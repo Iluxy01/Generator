@@ -9,7 +9,7 @@
         <item name="android:navigationBarColor">@color/ink</item>
     </style>
 
-    <style name="Theme.Holst.Layer" parent="android:Theme.Material.NoActionBar.Fullscreen">
+    <style name="Theme.Holst.Layer" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/sheet</item>
         <item name="android:windowAnimationStyle">@null</item>
         <item name="android:windowDisablePreview">true</item>

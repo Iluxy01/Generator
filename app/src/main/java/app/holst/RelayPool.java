@@ -29,8 +29,7 @@ final class RelayPool {
         "wss://nos.lol",
         "wss://nostr.mom",
         "wss://relay.snort.social",
-        "wss://nostr.oxtr.dev",
-        "wss://relay.damus.io",
+        "wss://nostr.data.haus",
     };
 
     static final int KIND_STORED = 30078;

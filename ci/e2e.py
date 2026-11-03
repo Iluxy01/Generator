@@ -25,8 +25,7 @@ RELAYS = [
     "wss://nos.lol",
     "wss://nostr.mom",
     "wss://relay.snort.social",
-    "wss://nostr.oxtr.dev",
-    "wss://relay.damus.io",
+    "wss://nostr.data.haus",
 ]
 KIND_STORED, KIND_LIVE = 30078, 20078
 results = []
@@ -381,6 +380,7 @@ def main():
     time.sleep(6)
     sh("shell", "input", "keyevent", "KEYCODE_BACK")
     time.sleep(3)
+    diag("after back")
     check("слой закрылся по «назад»", not on_layer(), top_activity())
     path = shot("09_system_keyguard")
     wall_px = count_color(path, colour)
@@ -462,11 +462,12 @@ def main():
     sh("shell", "appops", "set", PKG, "SYSTEM_ALERT_WINDOW", "allow")
 
     # ---- Картинка из галереи ----
-    sh("shell", "input", "keyevent", "KEYCODE_BACK")
-    time.sleep(1)
-    wake_phone()
-    sh("shell", "input", "keyevent", "82")
-    time.sleep(1)
+    tap_xy(W // 2, int(H - 62 * W / 411))
+    time.sleep(2.5)
+    sh("shell", "input", "text", "1234")
+    sh("shell", "input", "keyevent", "KEYCODE_ENTER")
+    time.sleep(3)
+    diag("after second unlock")
     im = Image.new("RGB", (1600, 3000), (20, 140, 200))
     for y in range(1200, 1800):
         for x in range(1600):
@@ -475,9 +476,6 @@ def main():
     im.save(pic, quality=95)
     sh("push", pic, "/sdcard/Pictures/holst_test.jpg")
     sh("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file:///sdcard/Pictures/holst_test.jpg")
-    sh("shell", "input", "text", "1234")
-    sh("shell", "input", "keyevent", "KEYCODE_ENTER")
-    time.sleep(3)
     sh("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
     time.sleep(3)
     sh("shell", "input", "swipe", "540", "500", "540", "1900", "300")

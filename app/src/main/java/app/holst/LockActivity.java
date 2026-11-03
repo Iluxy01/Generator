@@ -7,9 +7,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -83,7 +82,6 @@ public final class LockActivity extends Activity implements Repo.Listener {
             w.setAttributes(lp);
         }
         setContentView(R.layout.activity_lock);
-        hideBars();
 
         canvas = findViewById(R.id.canvas);
         clockBox = findViewById(R.id.clock_box);
@@ -101,27 +99,36 @@ public final class LockActivity extends Activity implements Repo.Listener {
         undo.setOnClickListener(v -> app.repo.undoMine());
         clearButton.setOnClickListener(v -> onClearTapped());
 
+        drawEdgeToEdge();
         buildPanel();
         applyBrush();
     }
 
-    private void hideBars() {
+    /**
+     * Рисуем на весь экран, но системные панели не прячем: при скрытии Android показывает поверх
+     * окна подсказку «Viewing full screen», которая закрывает и затемняет холст.
+     */
+    private void drawEdgeToEdge() {
         Window w = getWindow();
         if (Build.VERSION.SDK_INT >= 30) {
             w.setDecorFitsSystemWindows(false);
-            WindowInsetsController c = w.getInsetsController();
-            if (c != null) {
-                c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            }
         } else {
-            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            w.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         }
+        // Панель инструментов не должна попадать под кнопки навигации.
+        findViewById(R.id.root).setOnApplyWindowInsetsListener((v, insets) -> {
+            int nav = insets.getSystemWindowInsetBottom();
+            int bottom = Math.max(dp(20), nav + dp(2));
+            FrameLayout.LayoutParams barLp = (FrameLayout.LayoutParams) bar.getLayoutParams();
+            barLp.bottomMargin = bottom;
+            bar.setLayoutParams(barLp);
+            FrameLayout.LayoutParams panelLp = (FrameLayout.LayoutParams) panel.getLayoutParams();
+            panelLp.bottomMargin = bottom + dp(88);
+            panel.setLayoutParams(panelLp);
+            return insets;
+        });
     }
 
     private void buildPanel() {
@@ -259,18 +266,6 @@ public final class LockActivity extends Activity implements Repo.Listener {
         app.sync.catchUp();
         canvas.refreshIfStale();
         onLiveChanged();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        hideBars();
-    }
-
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) hideBars();
     }
 
     @Override

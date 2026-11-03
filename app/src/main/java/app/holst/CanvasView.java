@@ -19,7 +19,7 @@ public final class CanvasView extends View implements Repo.Listener {
         void onDrawing(boolean drawing);
     }
 
-    private static final long LIVE_SEND_MS = 220;
+    private static final long LIVE_SEND_MS = 300;
     private static final int MIN_STEP = 12;
     private static final int MAX_PAIRS = 1200;
 
