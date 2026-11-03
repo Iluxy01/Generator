@@ -5,6 +5,11 @@ name: Сборка
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'ci/DIAGNOSE'
+      - 'ci/probe.py'
+      - 'ci/stress.py'
+      - '.github/workflows/diagnose.yml'
   workflow_dispatch:
 
 permissions:

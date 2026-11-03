@@ -138,17 +138,18 @@ class Friend:
             plain = json.loads(self.aes.decrypt(raw[:12], raw[12:], None))
             plain["_kind"] = e["kind"]
             plain["_relay"] = url
+            plain["_at"] = time.time()
             self.got.append(plain)
         elif m[0] == "OK":
             self.acks.setdefault(m[1], {})[url] = (m[2], m[3] if len(m) > 3 else "")
         elif m[0] in ("NOTICE", "CLOSED"):
             print(f"  {url}: {m}", flush=True)
 
-    def publish(self, kind, d, plain):
+    def publish(self, kind, d, plain, created_at=None):
         nonce = secrets.token_bytes(12)
         content = base64.b64encode(nonce + self.aes.encrypt(nonce, json.dumps(plain, separators=(",", ":")).encode(), None)).decode()
         tags = [["d", d]] if d else []
-        created = int(time.time())
+        created = created_at if created_at is not None else int(time.time())
         ser = json.dumps([0, self.pub, created, kind, tags, content], separators=(",", ":"), ensure_ascii=False)
         eid = hashlib.sha256(ser.encode()).digest()
         ev = {"id": eid.hex(), "pubkey": self.pub, "created_at": created, "kind": kind, "tags": tags,
