@@ -56,6 +56,14 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Скачать образ эмулятора с повторами
+        run: |
+          for i in 1 2 3 4 5; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'system-images;android-34;google_apis;x86_64' > /tmp/sdk.log 2>&1
+            if ! grep -q 'error occurred' /tmp/sdk.log && [ -d "$ANDROID_HOME/system-images/android-34/google_apis/x86_64" ]; then echo ok; exit 0; fi
+            echo "попытка $i не удалась"; tail -2 /tmp/sdk.log; sleep 20
+          done
+          exit 1
       - name: Проверка на эмуляторе
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -85,6 +93,14 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Скачать образ эмулятора с повторами
+        run: |
+          for i in 1 2 3 4 5; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'system-images;android-34;google_apis;x86_64' > /tmp/sdk.log 2>&1
+            if ! grep -q 'error occurred' /tmp/sdk.log && [ -d "$ANDROID_HOME/system-images/android-34/google_apis/x86_64" ]; then echo ok; exit 0; fi
+            echo "попытка $i не удалась"; tail -2 /tmp/sdk.log; sleep 20
+          done
+          exit 1
       - name: Стресс-тест
         uses: reactivecircus/android-emulator-runner@v2
         with:
