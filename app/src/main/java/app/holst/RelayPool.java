@@ -33,7 +33,6 @@ final class RelayPool {
         "wss://nostr.mom",
         "wss://relay.snort.social",
         "wss://nostr.data.haus",
-        "wss://nostr-pub.wellorder.net",
         "wss://relay.sigit.io",
         "wss://nostr-01.yakihonne.com",
     };
@@ -175,7 +174,7 @@ final class RelayPool {
         if (message == null) return false;
         String m = message.toLowerCase(Locale.ROOT);
         return m.contains("rate") || m.contains("too many") || m.contains("slow down") || m.contains("banned")
-                || m.contains("noting too much");
+                || m.contains("noting too much") || m.contains("spam") || m.contains("blocked");
     }
 
     final class Conn extends WebSocketListener {

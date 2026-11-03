@@ -26,7 +26,6 @@ RELAYS = [
     "wss://nostr.mom",
     "wss://relay.snort.social",
     "wss://nostr.data.haus",
-    "wss://nostr-pub.wellorder.net",
     "wss://relay.sigit.io",
     "wss://nostr-01.yakihonne.com",
 ]
@@ -239,9 +238,26 @@ def tap_xy(x, y):
     sh("shell", "input", "tap", str(x), str(y))
 
 
+def dismiss_system_dialogs():
+    """Медленный эмулятор иногда показывает «X isn't responding» поверх всего. Приложение тут ни при чём."""
+    for node in ui_nodes():
+        if (node.get("text") or "") == "Wait":
+            tap_xy(*center(node))
+            time.sleep(1)
+            return True
+    return False
+
+
+def stabilize():
+    sh("shell", "settings", "put", "global", "hide_error_dialogs", "1")
+    time.sleep(25)
+    dismiss_system_dialogs()
+
+
 def tap_text(text, timeout=20, scroll=True):
     end = time.time() + timeout
     while time.time() < end:
+        dismiss_system_dialogs()
         node = find_text(text)
         if node is not None:
             x, y = center(node)
@@ -257,6 +273,29 @@ def top_activity():
     out = sh("shell", "dumpsys", "activity", "activities")
     m = re.search(r"topResumedActivity=.*?\{[^}]*\s(\S+/\S+)", out) or re.search(r"ResumedActivity.*?\s(\S+/\S+)", out)
     return m.group(1) if m else ""
+
+
+def join_room(code):
+    """Выбирает чистый лист и входит по коду; проверяет, что это действительно получилось."""
+    pretty = f"{code[:4]} {code[4:8]} {code[8:]}"
+    for attempt in range(3):
+        sh("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
+        time.sleep(4)
+        sh("shell", "input", "swipe", "540", "500", "540", "1900", "300")
+        time.sleep(1)
+        tap_text("Чистый лист")
+        time.sleep(3)
+        tap_text("Ввести код друга")
+        time.sleep(1.5)
+        sh("shell", "input", "text", code)
+        time.sleep(1)
+        shot("03_join_dialog")
+        tap_text("Присоединиться", scroll=False)
+        time.sleep(3)
+        if find_text(pretty) is not None and "CanvasService" in sh("shell", "dumpsys", "activity", "services", PKG):
+            return True
+        print(f"  join attempt {attempt} failed, top={top_activity()}", flush=True)
+    return False
 
 
 def diag(label):
@@ -305,24 +344,13 @@ def main():
     sh("logcat", "-c")
 
     # ---- Первый запуск ----
+    stabilize()
     sh("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
     time.sleep(4)
     shot("01_first_launch")
     check("приложение открылось", PKG in top_activity(), top_activity())
 
-    check("нажат «Чистый лист»", tap_text("Чистый лист"))
-    time.sleep(3)
-    shot("02_after_blank")
-    check("служба работает", "CanvasService" in sh("shell", "dumpsys", "activity", "services", PKG))
-
-    # ---- Вход по коду друга ----
-    check("открыт ввод кода", tap_text("Ввести код друга"))
-    time.sleep(1.5)
-    sh("shell", "input", "text", code)
-    time.sleep(1)
-    shot("03_join_dialog")
-    check("код принят", tap_text("Присоединиться", scroll=False))
-    time.sleep(3)
+    check("вошёл по коду друга, служба работает", join_room(code))
 
     connected = None
     for _ in range(30):

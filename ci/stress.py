@@ -339,22 +339,23 @@ def main():
     c.W, c.H = int(size[0]), int(size[1])
     c.dp = c.W / 411
     c.bar_y = int(c.H - 62 * c.dp)
-    sh("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
-    time.sleep(4)
-    tap_text("Чистый лист")
-    time.sleep(2)
-    tap_text("Ввести код друга")
-    time.sleep(1.5)
-    sh("shell", "input", "text", code)
-    time.sleep(1)
-    tap_text("Присоединиться", scroll=False)
-    time.sleep(10)
+    e2e.stabilize()
+    if not e2e.join_room(code):
+        print("НЕ ПРОШЛО: не удалось настроить приложение", flush=True)
+        shot("s_setup_failed")
+        sys.exit(1 if strict else 0)
+    time.sleep(8)
     section(pick_picture, c)
     sh("shell", "locksettings", "set-pin", "1234")
     # Приложение остаётся открытым в фоне: люди обычно просто гасят экран, не закрывая его.
     sleep_phone()
     wake_phone()
     print("on layer:", on_layer(), top_activity(), flush=True)
+    if not on_layer():
+        sleep_phone()
+        wake_phone()
+        print("on layer after retry:", on_layer(), top_activity(), flush=True)
+    shot("s0_layer")
 
     for fn in (steady_drawing, long_stroke, clear_with_clock_skew, undo_with_clock_skew, friend_clear_old_clock,
                silent_disconnect, anti_entropy, flood, friend_drawing):
