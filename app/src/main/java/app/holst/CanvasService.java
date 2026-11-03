@@ -29,8 +29,11 @@ public final class CanvasService extends Service implements Repo.Listener {
     private static final int ID_SERVICE = 1;
     private static final int ID_FRIEND = 2;
     private static final int ID_LAYER = 3;
-    private static final long WALLPAPER_DEBOUNCE_MS = 2500;
+    private static final long WALLPAPER_SCREEN_ON_MS = 5000;
+    private static final long WALLPAPER_SCREEN_OFF_MS = 15_000;
     private static final long FRIEND_NOTIFY_EVERY_MS = 60_000;
+
+    private static CanvasService running;
 
     private App app;
     private long lastFriendNotify;
@@ -79,6 +82,7 @@ public final class CanvasService extends Service implements Repo.Listener {
     public void onCreate() {
         super.onCreate();
         app = App.get();
+        running = this;
         goForeground();
 
         IntentFilter f = new IntentFilter();
@@ -138,6 +142,7 @@ public final class CanvasService extends Service implements Repo.Listener {
     }
 
     private void onScreenOff() {
+        app.sync.updatePace();
         cancelLayerNotification();
         // Экран погас: обои должны быть свежими ещё до следующего включения.
         app.main.removeCallbacks(writeWallpaper);
@@ -200,17 +205,33 @@ public final class CanvasService extends Service implements Repo.Listener {
 
     // ---------- Обои ----------
 
+    /** Слой скрылся: теперь виден настоящий экран блокировки, обои должны быть свежими. */
+    static void onLayerHidden() {
+        CanvasService s = running;
+        if (s != null) s.requestWallpaper(200);
+    }
+
     private void requestWallpaper(long delay) {
         if (!app.prefs.enabled() || !app.prefs.chosen()) return;
         app.main.removeCallbacks(writeWallpaper);
         app.main.postDelayed(writeWallpaper, delay);
     }
 
+    /**
+     * Запись обоев — тяжёлая операция для всей системы, поэтому при рисовании обои не пишутся на
+     * каждый штрих. Пока виден холст, они и не нужны: запишутся, как только он скроется.
+     */
+    private void requestWallpaperAfterChange() {
+        if (LockActivity.isVisible()) return;
+        boolean screenOn = getSystemService(android.os.PowerManager.class).isInteractive();
+        requestWallpaper(screenOn ? WALLPAPER_SCREEN_ON_MS : WALLPAPER_SCREEN_OFF_MS);
+    }
+
     private void writeWallpaperNow() {
         final int revision = app.repo.revision();
         if (!app.prefs.enabled() || !app.prefs.chosen()) return;
         if (writeRunning) {
-            requestWallpaper(WALLPAPER_DEBOUNCE_MS);
+            requestWallpaper(1000);
             return;
         }
         boolean dirty = app.consumeWallpaperDirty();
@@ -228,18 +249,13 @@ public final class CanvasService extends Service implements Repo.Listener {
 
     @Override
     public void onStrokeAdded(Stroke s, boolean atEnd) {
-        requestWallpaper(WALLPAPER_DEBOUNCE_MS);
+        requestWallpaperAfterChange();
         if (!s.mine) notifyFriend();
     }
 
     @Override
     public void onReset() {
-        requestWallpaper(WALLPAPER_DEBOUNCE_MS);
-    }
-
-    @Override
-    public void onLiveChanged() {
-        // Живые штрихи показывает слой; в обои попадают только законченные.
+        requestWallpaperAfterChange();
     }
 
     private void notifyFriend() {
@@ -266,6 +282,7 @@ public final class CanvasService extends Service implements Repo.Listener {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        running = null;
         app.main.removeCallbacks(writeWallpaper);
         app.repo.removeListener(this);
         app.repo.saveAsync();

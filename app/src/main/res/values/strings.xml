@@ -13,6 +13,10 @@
     <string name="friend_card_hint">У кого одинаковый код, у того одинаковый рисунок</string>
     <string name="status_online">На связи: %1$d из %2$d каналов</string>
     <string name="status_offline">Подключаюсь…</string>
+    <string name="peer_online">Друг в сети</string>
+    <string name="peer_seen">Друг был в сети %1$d мин назад</string>
+    <string name="peer_none">Друга пока не видно: проверь, что код у вас один и тот же</string>
+    <string name="no_connection">Нет связи: рисунок отправится позже</string>
     <string name="share">Отправить другу</string>
     <string name="join">Ввести код друга</string>
     <string name="share_text">Давай рисовать друг у друга на экране блокировки! Поставь Холст: %1$s\nИ введи мой код: %2$s</string>

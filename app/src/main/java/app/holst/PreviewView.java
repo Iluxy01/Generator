@@ -5,11 +5,23 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.util.AttributeSet;
 import android.view.View;
+import java.util.List;
 
-/** Маленькая копия обоев в приложении. Только показывает; рисуют на самих обоях. */
+/**
+ * Маленькая копия обоев в приложении. Только показывает; рисуют на самих обоях.
+ * Собирается в отдельном потоке и только пока приложение на экране: открытое в фоне окно не должно
+ * тормозить холст на экране блокировки.
+ */
 public final class PreviewView extends View implements Repo.Listener {
+    private static final long REFRESH_GAP_MS = 400;
+
     private final App app = App.get();
     private Bitmap frame;
+    private boolean shown;
+    private boolean composing;
+    private boolean dirty = true;
+
+    private final Runnable composeLater = this::compose;
 
     public PreviewView(Context c, AttributeSet a) {
         super(c, a);
@@ -24,9 +36,34 @@ public final class PreviewView extends View implements Repo.Listener {
     }
 
     void refresh() {
-        if (getWidth() <= 0 || getHeight() <= 0) return;
-        frame = Bg.compose(getContext(), app.repo.strokes(), getWidth(), getHeight());
-        invalidate();
+        dirty = true;
+        compose();
+    }
+
+    private void compose() {
+        if (!shown || composing || !dirty || getWidth() <= 0 || getHeight() <= 0) return;
+        composing = true;
+        dirty = false;
+        final int w = getWidth();
+        final int h = getHeight();
+        final List<Stroke> strokes = app.repo.strokes();
+        final Context context = getContext();
+        app.render.execute(() -> {
+            final Bitmap out = Bg.compose(context, strokes, w, h);
+            post(() -> {
+                composing = false;
+                frame = out;
+                invalidate();
+                if (dirty) postDelayed(composeLater, REFRESH_GAP_MS);
+            });
+        });
+    }
+
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        shown = visibility == VISIBLE;
+        if (shown) compose();
     }
 
     @Override
@@ -52,16 +89,19 @@ public final class PreviewView extends View implements Repo.Listener {
         else c.drawColor(Bg.SHEET);
     }
 
+    private void markDirty() {
+        dirty = true;
+        removeCallbacks(composeLater);
+        postDelayed(composeLater, REFRESH_GAP_MS);
+    }
+
     @Override
     public void onStrokeAdded(Stroke s, boolean atEnd) {
-        refresh();
+        markDirty();
     }
 
     @Override
     public void onReset() {
-        refresh();
+        markDirty();
     }
-
-    @Override
-    public void onLiveChanged() {}
 }

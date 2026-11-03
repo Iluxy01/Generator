@@ -5,6 +5,7 @@ import android.app.KeyguardManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.Display;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -28,6 +29,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
     private static final float[] DOT_RADII = {4f, 7f, 11f};
     private static final long CHROME_BACK_MS = 500;
     private static final long CONFIRM_MS = 3000;
+    private static final long FRIEND_CHIP_MS = 4000;
 
     private static LockActivity alive;
     private static boolean visible;
@@ -44,8 +46,14 @@ public final class LockActivity extends Activity implements Repo.Listener {
     private final List<ColorDot> sizeDots = new ArrayList<>();
     private ColorDot eraserDot;
     private boolean confirmClear;
+    private boolean friendDrawing;
 
     private final Runnable chromeBack = () -> setChromeVisible(true);
+    private final Runnable friendDone = () -> {
+        friendDrawing = false;
+        updateChip();
+    };
+    private final Runnable statusListener = this::updateChip;
     private final Runnable clearReset = () -> {
         confirmClear = false;
         clearButton.setText(R.string.clear_all);
@@ -81,6 +89,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             w.setAttributes(lp);
         }
+        useHighestRefreshRate(w);
         setContentView(R.layout.activity_lock);
 
         canvas = findViewById(R.id.canvas);
@@ -102,6 +111,27 @@ public final class LockActivity extends Activity implements Repo.Listener {
         drawEdgeToEdge();
         buildPanel();
         applyBrush();
+    }
+
+    /** На экранах 90 и 120 Гц линия заметно плавнее. */
+    private void useHighestRefreshRate(Window w) {
+        try {
+            Display d = getWindowManager().getDefaultDisplay();
+            Display.Mode current = d.getMode();
+            Display.Mode best = current;
+            for (Display.Mode m : d.getSupportedModes()) {
+                if (m.getPhysicalWidth() == current.getPhysicalWidth()
+                        && m.getPhysicalHeight() == current.getPhysicalHeight()
+                        && m.getRefreshRate() > best.getRefreshRate()) {
+                    best = m;
+                }
+            }
+            WindowManager.LayoutParams lp = w.getAttributes();
+            lp.preferredDisplayModeId = best.getModeId();
+            w.setAttributes(lp);
+        } catch (RuntimeException ignored) {
+            // Частота экрана — не повод не показать холст.
+        }
     }
 
     /**
@@ -262,10 +292,11 @@ public final class LockActivity extends Activity implements Repo.Listener {
         super.onStart();
         visible = true;
         app.repo.addListener(this);
+        app.sync.addStatusListener(statusListener);
         app.sync.start();
         app.sync.catchUp();
         canvas.refreshIfStale();
-        onLiveChanged();
+        updateChip();
     }
 
     @Override
@@ -273,6 +304,9 @@ public final class LockActivity extends Activity implements Repo.Listener {
         super.onStop();
         visible = false;
         app.repo.removeListener(this);
+        app.sync.removeStatusListener(statusListener);
+        app.sync.updatePace();
+        CanvasService.onLayerHidden();
     }
 
     @Override
@@ -294,8 +328,17 @@ public final class LockActivity extends Activity implements Repo.Listener {
     public void onReset() {}
 
     @Override
-    public void onLiveChanged() {
-        boolean friendDrawing = !app.repo.liveStrokes().isEmpty();
-        friendChip.setVisibility(friendDrawing ? View.VISIBLE : View.INVISIBLE);
+    public void onLiveChunk(LiveChunk c) {
+        friendDrawing = true;
+        updateChip();
+        friendChip.removeCallbacks(friendDone);
+        friendChip.postDelayed(friendDone, FRIEND_CHIP_MS);
+    }
+
+    private void updateChip() {
+        boolean offline = app.sync.openCount() == 0;
+        if (friendDrawing) friendChip.setText(R.string.friend_drawing);
+        else if (offline) friendChip.setText(R.string.no_connection);
+        friendChip.setVisibility(friendDrawing || offline ? View.VISIBLE : View.INVISIBLE);
     }
 }

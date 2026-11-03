@@ -34,6 +34,7 @@ public final class MainActivity extends Activity {
     private TextView stepTitle;
     private TextView codeView;
     private TextView statusView;
+    private TextView peerView;
     private Switch enabledSwitch;
     private View permissionsCard;
     private Button overlayButton;
@@ -43,6 +44,13 @@ public final class MainActivity extends Activity {
     private boolean bindingSwitch;
 
     private final Runnable statusListener = this::refreshStatus;
+    private final Runnable statusTimer = new Runnable() {
+        @Override
+        public void run() {
+            refreshStatus();
+            statusView.postDelayed(this, 10_000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -54,6 +62,7 @@ public final class MainActivity extends Activity {
         stepTitle = findViewById(R.id.step_title);
         codeView = findViewById(R.id.code);
         statusView = findViewById(R.id.status);
+        peerView = findViewById(R.id.peer_status);
         enabledSwitch = findViewById(R.id.enabled);
         permissionsCard = findViewById(R.id.permissions_card);
         overlayButton = findViewById(R.id.perm_overlay);
@@ -80,6 +89,8 @@ public final class MainActivity extends Activity {
         super.onStart();
         app.sync.addStatusListener(statusListener);
         app.sync.start();
+        app.sync.catchUp();
+        statusView.post(statusTimer);
     }
 
     @Override
@@ -94,6 +105,7 @@ public final class MainActivity extends Activity {
     protected void onStop() {
         super.onStop();
         app.sync.removeStatusListener(statusListener);
+        statusView.removeCallbacks(statusTimer);
         if (!app.prefs.enabled()) app.sync.stop();
     }
 
@@ -136,6 +148,16 @@ public final class MainActivity extends Activity {
                 : getString(R.string.status_offline));
         statusView.setCompoundDrawablesRelativeWithIntrinsicBounds(
                 open > 0 ? R.drawable.dot_on : R.drawable.dot_off, 0, 0, 0);
+
+        long seen = app.sync.peerSeenAt();
+        if (app.sync.peerOnline()) {
+            peerView.setText(R.string.peer_online);
+        } else if (seen != 0) {
+            long minutes = Math.max(1, (System.currentTimeMillis() - seen) / 60_000);
+            peerView.setText(getString(R.string.peer_seen, minutes));
+        } else {
+            peerView.setText(R.string.peer_none);
+        }
     }
 
     // ---------- Подложка ----------

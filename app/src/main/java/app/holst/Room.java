@@ -24,12 +24,14 @@ final class Room {
     final byte[] secret;
     final byte[] aesKey;
     final String pubHex;
+    private final Crypto.Signer signer;
 
     private Room(String code, byte[] secret, byte[] aesKey, String pubHex) {
         this.code = code;
         this.secret = secret;
         this.aesKey = aesKey;
         this.pubHex = pubHex;
+        this.signer = new Crypto.Signer(secret);
     }
 
     static Room derive(String code) {
@@ -113,7 +115,7 @@ final class Room {
         byte[] aux = new byte[32];
         RANDOM.nextBytes(aux);
         String id = Crypto.hex(idBytes);
-        String sig = Crypto.hex(Crypto.sign(secret, idBytes, aux));
+        String sig = Crypto.hex(signer.sign(idBytes, aux));
         String json = "{\"id\":\"" + id + "\",\"pubkey\":\"" + pubHex + "\",\"created_at\":" + createdAt
                 + ",\"kind\":" + kind + ",\"tags\":" + tags + ",\"content\":\"" + content
                 + "\",\"sig\":\"" + sig + "\"}";

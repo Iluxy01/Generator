@@ -12,9 +12,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import org.json.JSONArray;
@@ -23,13 +22,18 @@ import org.json.JSONObject;
 
 /**
  * Содержимое общего листа. Работает только в главном потоке.
- * Каждый телефон хранит лист сам; два телефона сходятся к одному результату независимо от того,
- * в каком порядке дошли события.
+ * Лист — это штрихи, список отменённых и момент последнего стирания. Такие данные можно объединять
+ * в любом порядке, поэтому два телефона рано или поздно приходят к одному рисунку.
  */
 final class Repo {
     private static final String TAG = "Holst";
     private static final int MAX_STROKES = 4000;
-    private static final long LIVE_TTL_MS = 8000;
+    private static final int MAX_DEAD = 5000;
+    /**
+     * Стирание накрывает штрихи чуть вперёд по времени. Если часы друга спешат или его штрих ещё в
+     * пути, он сотрётся у обоих, а не останется только у него.
+     */
+    private static final long CLEAR_MARGIN_MS = 60_000;
 
     interface Listener {
         /** atEnd: штрих лёг поверх остальных, можно дорисовать, не перестраивая картинку. */
@@ -37,7 +41,7 @@ final class Repo {
 
         void onReset();
 
-        void onLiveChanged();
+        default void onLiveChunk(LiveChunk c) {}
     }
 
     /** То, что ещё нужно доставить на ретрансляторы. */
@@ -47,7 +51,9 @@ final class Repo {
         final long sec;
         volatile Room.Event event;
         volatile long eventSec;
-        int acks;
+        final HashSet<String> ackRelays = new HashSet<>();
+        long nextSend;
+        int attempts;
 
         Op(String d, String payload, long sec) {
             this.d = d;
@@ -56,27 +62,14 @@ final class Repo {
         }
     }
 
-    /** Штрих друга, который рисуется прямо сейчас. */
-    static final class Live {
-        final String id;
-        final int color;
-        final int width;
-        final boolean erase;
-        int[] pts = new int[256];
-        int count;
-        int seq = -1;
-        long seen;
-
-        Live(String id, int color, int width, boolean erase) {
-            this.id = id;
-            this.color = color;
-            this.width = width;
-            this.erase = erase;
-        }
+    interface OutboxListener {
+        void onOutboxChanged();
     }
 
-    interface OutboxListener {
-        void onOp(Op op);
+    /** Что выяснилось при сверке с другим телефоном. */
+    static final class Comparison {
+        int resent;
+        boolean iAmMissing;
     }
 
     private final File file;
@@ -85,17 +78,18 @@ final class Repo {
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private final ArrayList<Stroke> strokes = new ArrayList<>();
     private final HashMap<String, Stroke> byId = new HashMap<>();
-    private final HashSet<String> dead = new HashSet<>();
+    private final LinkedHashSet<String> dead = new LinkedHashSet<>();
     private final ArrayList<Op> outbox = new ArrayList<>();
-    private final LinkedHashMap<String, Live> live = new LinkedHashMap<>();
     private OutboxListener outboxListener;
     private long clearT;
     private long hlc;
     private long watermark;
     private int revision;
+    private int clearEpoch;
+    private long idXor;
+    private long lastChangeMs;
 
     private final Runnable saver = this::saveAsync;
-    private final Runnable liveSweep = this::sweepLive;
 
     Repo(Context c, ExecutorService disk) {
         this.file = new File(c.getFilesDir(), "sheet.json");
@@ -123,17 +117,54 @@ final class Repo {
         return new ArrayList<>(outbox);
     }
 
-    List<Live> liveStrokes() {
-        return new ArrayList<>(live.values());
+    boolean hasPendingOps() {
+        return !outbox.isEmpty();
+    }
+
+    boolean contains(String id) {
+        return byId.containsKey(id);
+    }
+
+    boolean isLast(Stroke s) {
+        return !strokes.isEmpty() && strokes.get(strokes.size() - 1) == s;
     }
 
     int revision() {
         return revision;
     }
 
+    int clearEpoch() {
+        return clearEpoch;
+    }
+
+    long clearT() {
+        return clearT;
+    }
+
+    int count() {
+        return strokes.size();
+    }
+
+    /** Отпечаток набора штрихов: не зависит от порядка, считается за постоянное время. */
+    String fingerprint() {
+        return Long.toHexString(idXor);
+    }
+
+    long lastChangeMs() {
+        return lastChangeMs;
+    }
+
     /** С какого момента просить у ретранслятора пропущенное. */
     long sinceSec() {
         return watermark == 0 ? 0 : Math.max(0, watermark - 600);
+    }
+
+    private static long idBits(String id) {
+        try {
+            return Long.parseUnsignedLong(id, 16);
+        } catch (NumberFormatException e) {
+            return id.hashCode();
+        }
     }
 
     private long nextT() {
@@ -151,8 +182,8 @@ final class Repo {
 
     // ---------- Свои действия ----------
 
-    Stroke addMine(String id, int color, int width, boolean erase, int[] pts) {
-        Stroke s = new Stroke(id, nextT(), nowSec(), color, width, erase, pts, true);
+    Stroke addMine(String id, int color, int width, boolean erase, int[] pts, int duration) {
+        Stroke s = new Stroke(id, nextT(), nowSec(), color, width, erase, pts, true, duration);
         insert(s);
         enqueue(new Op(id, s.payload(), s.sec));
         return s;
@@ -163,15 +194,14 @@ final class Repo {
         for (int i = strokes.size() - 1; i >= 0; i--) {
             Stroke s = strokes.get(i);
             if (!s.mine) continue;
-            strokes.remove(i);
-            byId.remove(s.id);
-            dead.add(s.id);
+            remove(i, s);
+            markDead(s.id);
             Iterator<Op> it = outbox.iterator();
             while (it.hasNext()) {
                 if (it.next().d.equals(s.id)) it.remove();
             }
-            long sec = Math.max(nowSec(), s.sec + 1);
-            enqueue(new Op(s.id, "{\"k\":\"d\",\"i\":\"" + s.id + "\"}", sec));
+            // Отмена — отдельное событие: иначе ретранслятор может отбросить её как «устаревшую».
+            enqueue(new Op("x" + s.id, "{\"k\":\"d\",\"i\":\"" + s.id + "\"}", nowSec()));
             changed();
             for (Listener l : listeners) l.onReset();
             return true;
@@ -180,21 +210,37 @@ final class Repo {
     }
 
     void clearAll() {
-        long t = nextT();
+        long t = Math.max(System.currentTimeMillis() + CLEAR_MARGIN_MS, hlc + 1);
+        hlc = t;
         applyClear(t);
-        enqueue(new Op("clear", "{\"k\":\"c\",\"t\":" + t + "}", nowSec()));
+        // У каждого стирания своё имя. С одним именем ретранслятор хранит только самое новое по
+        // часам телефона и молча отбрасывает остальные: у одного стёрлось, у другого нет.
+        enqueue(new Op("c" + t, "{\"k\":\"c\",\"t\":" + t + "}", nowSec()));
     }
 
     private void enqueue(Op op) {
         outbox.add(op);
         while (outbox.size() > 2000) outbox.remove(0);
         scheduleSave();
-        if (outboxListener != null) outboxListener.onOp(op);
+        if (outboxListener != null) outboxListener.onOutboxChanged();
     }
 
-    void acked(Op op) {
-        op.acks++;
-        if (op.acks >= 2 && outbox.remove(op)) scheduleSave();
+    /** Подтвердил ретранслятор. Двух достаточно, чтобы событие пережило отказ одного из них. */
+    void acked(Op op, String relay) {
+        op.ackRelays.add(relay);
+        if (op.ackRelays.size() >= 2 && outbox.remove(op)) scheduleSave();
+    }
+
+    /** Ретранслятор снова на связи: неподтверждённое стоит отправить ещё раз. */
+    void rewindPending() {
+        for (Op op : outbox) op.nextSend = 0;
+    }
+
+    /** Другой телефон подтвердил, что листы совпали: повторно отправлять больше нечего. */
+    void dropOutbox() {
+        if (outbox.isEmpty()) return;
+        outbox.clear();
+        scheduleSave();
     }
 
     // ---------- Что пришло от друга ----------
@@ -211,19 +257,9 @@ final class Repo {
                 observeT(s.t);
                 if (s.t <= clearT || dead.contains(s.id) || byId.containsKey(s.id)) return;
                 insert(s);
-                if (live.remove(s.id) != null) notifyLive();
                 break;
             case "d":
-                String id = o.getString("i");
-                dead.add(id);
-                Stroke gone = byId.remove(id);
-                if (gone != null) {
-                    strokes.remove(gone);
-                    changed();
-                    for (Listener l : listeners) l.onReset();
-                } else {
-                    scheduleSave();
-                }
+                applyDead(o.getString("i"));
                 break;
             case "c":
                 long t = o.getLong("t");
@@ -235,66 +271,61 @@ final class Repo {
         }
     }
 
+    void applyPeerClear(long t) {
+        observeT(t);
+        applyClear(t);
+    }
+
+    private void applyDead(String id) {
+        markDead(id);
+        Stroke gone = byId.get(id);
+        if (gone != null) {
+            remove(strokes.indexOf(gone), gone);
+            changed();
+            for (Listener l : listeners) l.onReset();
+        } else {
+            scheduleSave();
+        }
+    }
+
+    private void markDead(String id) {
+        dead.add(id);
+        if (dead.size() > MAX_DEAD) {
+            Iterator<String> it = dead.iterator();
+            it.next();
+            it.remove();
+        }
+    }
+
     void applyLive(JSONObject o) throws JSONException {
         String id = o.getString("i");
         if (byId.containsKey(id) || dead.contains(id)) return;
-        Live l = live.get(id);
-        if (l == null) {
-            l = new Live(id, o.getInt("c"), o.getInt("w"), o.optInt("e") != 0);
-            live.put(id, l);
-        }
-        int seq = o.getInt("n");
-        l.seen = System.currentTimeMillis();
-        if (seq <= l.seq) return;
-        l.seq = seq;
-        int[] chunk = Stroke.readDelta(o.getJSONArray("p"));
-        if (l.count + chunk.length > l.pts.length) {
-            int[] bigger = new int[Math.max(l.pts.length * 2, l.count + chunk.length)];
-            System.arraycopy(l.pts, 0, bigger, 0, l.count);
-            l.pts = bigger;
-        }
-        System.arraycopy(chunk, 0, l.pts, l.count, chunk.length);
-        l.count += chunk.length;
-        notifyLive();
-        main.removeCallbacks(liveSweep);
-        main.postDelayed(liveSweep, LIVE_TTL_MS);
-    }
-
-    private void sweepLive() {
-        long now = System.currentTimeMillis();
-        boolean removed = false;
-        Iterator<Map.Entry<String, Live>> it = live.entrySet().iterator();
-        while (it.hasNext()) {
-            if (now - it.next().getValue().seen >= LIVE_TTL_MS - 50) {
-                it.remove();
-                removed = true;
-            }
-        }
-        if (removed) notifyLive();
-        if (!live.isEmpty()) main.postDelayed(liveSweep, 1000);
-    }
-
-    private void notifyLive() {
-        for (Listener l : listeners) l.onLiveChanged();
+        LiveChunk c = new LiveChunk(id, o.getInt("c"), o.getInt("w"), o.optInt("e") != 0, o.getInt("n"),
+                Stroke.readDelta(o.getJSONArray("p")), o.optInt("a", -1), o.optInt("b", -1));
+        for (Listener l : listeners) l.onLiveChunk(c);
     }
 
     private void applyClear(long t) {
         if (t <= clearT) return;
         clearT = t;
-        boolean removed = false;
+        clearEpoch++;
         Iterator<Stroke> it = strokes.iterator();
         while (it.hasNext()) {
             Stroke s = it.next();
             if (s.t <= t) {
                 it.remove();
                 byId.remove(s.id);
-                removed = true;
+                idXor ^= idBits(s.id);
             }
         }
         changed();
-        if (removed) {
-            for (Listener l : listeners) l.onReset();
-        }
+        for (Listener l : listeners) l.onReset();
+    }
+
+    private void remove(int index, Stroke s) {
+        strokes.remove(index);
+        byId.remove(s.id);
+        idXor ^= idBits(s.id);
     }
 
     private void insert(Stroke s) {
@@ -310,9 +341,11 @@ final class Repo {
         boolean atEnd = lo == strokes.size();
         strokes.add(lo, s);
         byId.put(s.id, s);
+        idXor ^= idBits(s.id);
         boolean trimmed = false;
         while (strokes.size() > MAX_STROKES) {
-            byId.remove(strokes.remove(0).id);
+            Stroke old = strokes.get(0);
+            remove(0, old);
             trimmed = true;
         }
         changed();
@@ -324,6 +357,7 @@ final class Repo {
 
     private void changed() {
         revision++;
+        lastChangeMs = System.currentTimeMillis();
         scheduleSave();
     }
 
@@ -333,11 +367,86 @@ final class Repo {
         byId.clear();
         dead.clear();
         outbox.clear();
-        live.clear();
+        idXor = 0;
         clearT = 0;
         watermark = 0;
+        clearEpoch++;
         changed();
         for (Listener l : listeners) l.onReset();
+    }
+
+    // ---------- Сверка с другим телефоном ----------
+
+    /** Опись недавних штрихов и отмен для другого телефона. */
+    String inventoryPayload(String deviceId) {
+        int maxIds = 800;
+        int from = Math.max(0, strokes.size() - maxIds);
+        long windowT = from > 0 ? strokes.get(from).t : 0;
+        StringBuilder sb = new StringBuilder(16 + (strokes.size() - from) * 13);
+        sb.append("{\"k\":\"v\",\"f\":\"").append(deviceId).append("\",\"c\":").append(clearT)
+                .append(",\"w\":").append(windowT).append(",\"s\":[");
+        for (int i = from; i < strokes.size(); i++) {
+            String id = strokes.get(i).id;
+            if (i > from) sb.append(',');
+            sb.append('"').append(id, 0, Math.min(10, id.length())).append('"');
+        }
+        sb.append("],\"x\":[");
+        int skip = Math.max(0, dead.size() - 200);
+        int i = 0;
+        boolean first = true;
+        for (String id : dead) {
+            if (i++ < skip) continue;
+            if (!first) sb.append(',');
+            first = false;
+            sb.append('"').append(id).append('"');
+        }
+        return sb.append("]}").toString();
+    }
+
+    /**
+     * Сравнивает свой лист с описью друга: применяет его стирания и отмены, а штрихи, которых у него
+     * нет, снова ставит на отправку.
+     */
+    Comparison compareInventory(JSONObject o) throws JSONException {
+        Comparison r = new Comparison();
+        long c = o.optLong("c");
+        if (c > clearT) applyPeerClear(c);
+        JSONArray x = o.optJSONArray("x");
+        if (x != null) {
+            for (int i = 0; i < x.length(); i++) {
+                String id = x.getString(i);
+                if (!dead.contains(id)) applyDead(id);
+            }
+        }
+        JSONArray s = o.getJSONArray("s");
+        HashSet<String> theirs = new HashSet<>(s.length() * 2);
+        for (int i = 0; i < s.length(); i++) theirs.add(s.getString(i));
+        HashSet<String> mine = new HashSet<>(strokes.size() * 2);
+        long windowT = o.optLong("w");
+        long now = System.currentTimeMillis();
+        for (Stroke st : strokes) {
+            String prefix = st.id.substring(0, Math.min(10, st.id.length()));
+            mine.add(prefix);
+            // Совсем свежий штрих может быть ещё в пути.
+            if (st.t >= windowT && !theirs.contains(prefix) && now - st.seenMs > 6000 && r.resent < 150) {
+                resend(st);
+                r.resent++;
+            }
+        }
+        for (String id : theirs) {
+            if (!mine.contains(id)) {
+                r.iAmMissing = true;
+                break;
+            }
+        }
+        return r;
+    }
+
+    private void resend(Stroke st) {
+        for (Op op : outbox) {
+            if (op.d.equals(st.id)) return;
+        }
+        enqueue(new Op(st.id, st.payload(), nowSec()));
     }
 
     // ---------- Диск ----------
@@ -406,6 +515,7 @@ final class Repo {
                 Stroke s = Stroke.parse(item.getJSONObject("o"), item.optLong("z"), item.optInt("m") != 0);
                 strokes.add(s);
                 byId.put(s.id, s);
+                idXor ^= idBits(s.id);
             }
             JSONArray d = o.optJSONArray("dead");
             if (d != null) {

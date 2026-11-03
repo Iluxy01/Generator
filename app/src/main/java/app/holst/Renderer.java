@@ -33,12 +33,45 @@ final class Renderer {
         return p;
     }
 
-    static void draw(Canvas c, int[] pts, int count, int color, int width, boolean erase,
-                     float w, float h, Paint p) {
-        if (count < 2) return;
+    static void setup(Paint p, int color, int width, boolean erase, float w) {
         p.setColor(color | 0xFF000000);
         p.setStrokeWidth(Math.max(1f, width / Q * w));
         p.setXfermode(erase ? CLEAR : null);
+    }
+
+    /**
+     * Показывает начало штриха: все точки до lastIndex и плавный хвост к точке (tailX, tailY).
+     * Так штрих друга растёт непрерывно, а не прыжками от точки к точке.
+     */
+    static void drawPartial(Canvas c, Path path, Playback b, float w, float h, Paint p) {
+        setup(p, b.color, b.width, b.erase, w);
+        float k = w / Q;
+        float cy = h / 2f;
+        int[] pts = b.points();
+        int last = b.visibleIndex();
+        if (last == 0 && b.tailX() == pts[0] && b.tailY() == pts[1]) {
+            c.drawPoint(pts[0] * k, pts[1] * k + cy, p);
+            return;
+        }
+        path.rewind();
+        float px = pts[0] * k;
+        float py = pts[1] * k + cy;
+        path.moveTo(px, py);
+        for (int i = 1; i <= last; i++) {
+            float x = pts[i * 2] * k;
+            float y = pts[i * 2 + 1] * k + cy;
+            path.quadTo(px, py, (px + x) / 2f, (py + y) / 2f);
+            px = x;
+            py = y;
+        }
+        path.lineTo(b.tailX() * k, b.tailY() * k + cy);
+        c.drawPath(path, p);
+    }
+
+    static void draw(Canvas c, int[] pts, int count, int color, int width, boolean erase,
+                     float w, float h, Paint p) {
+        if (count < 2) return;
+        setup(p, color, width, erase, w);
         float k = w / Q;
         float cy = h / 2f;
         if (count < 4) {

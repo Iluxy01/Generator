@@ -1,4 +1,4 @@
-# Замеры: нагрузка на ретрансляторы и стресс-тест уже выложенного APK.
+# Замеры: нагрузка на ретрансляторы и стресс-тест выложенного сейчас APK, чтобы было с чем сравнить новый.
 name: Диагностика
 
 on:
@@ -17,12 +17,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install websocket-client cryptography pillow
+      - run: pip install websocket-client coincurve
       - run: cd ci && python3 probe.py
 
-  stress:
+  stress-released:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

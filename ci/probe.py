@@ -3,14 +3,12 @@
 У каждого ретранслятора свой случайный ключ. Второе соединение проверяет, что событие реально доходит."""
 import base64, hashlib, json, secrets, sys, threading, time
 import websocket
-from e2e import G, pmul, schnorr_sign
+from coincurve import PrivateKey
 
-CANDIDATES = """relay.primal.net nos.lol nostr.mom relay.snort.social nostr.data.haus nostr.oxtr.dev relay.damus.io
-nostr-pub.wellorder.net offchain.pub nostr.bitcoiner.social relay.nostr.net relay.mostr.pub relay.coinos.io
-relay.nostr.band strfry.iris.to nostr.einundzwanzig.space nostr-01.yakihonne.com relay.fountain.fm
-nostr.fmt.wiz.biz relay.sigit.io relay.nos.social""".split()
-SECONDS = 90
-LIVE_PER_SEC = 4
+CANDIDATES = """relay.primal.net nos.lol nostr.mom relay.snort.social nostr.data.haus nostr.oxtr.dev
+nostr-pub.wellorder.net relay.nostr.net nostr-01.yakihonne.com relay.sigit.io""".split()
+SECONDS = 120
+LIVE_PER_SEC = 3.3
 STORED_EVERY = 1.0
 rows = []
 
@@ -20,15 +18,15 @@ def event(sk, pub, kind, tags, content):
     ser = json.dumps([0, pub, created, kind, tags, content], separators=(",", ":"))
     eid = hashlib.sha256(ser.encode()).digest()
     return {"id": eid.hex(), "pubkey": pub, "created_at": created, "kind": kind, "tags": tags,
-            "content": content, "sig": schnorr_sign(eid, sk).hex()}
+            "content": content, "sig": sk.sign_schnorr(eid, secrets.token_bytes(32)).hex()}
 
 
 def probe(host):
     url = "wss://" + host
     r = {"host": host, "sent_live": 0, "sent_stored": 0, "ok": 0, "rej": 0, "msgs": {}, "got_live": 0, "got_stored": 0, "rtt": [], "error": ""}
     rows.append(r)
-    sk = secrets.token_bytes(32)
-    pub = pmul(G, int.from_bytes(sk, "big"))[0].to_bytes(32, "big").hex()
+    sk = PrivateKey()
+    pub = sk.public_key_xonly.format().hex()
     sent_at = {}
     try:
         t0 = time.time()

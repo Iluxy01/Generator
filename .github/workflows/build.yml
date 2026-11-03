@@ -1,4 +1,4 @@
-# Собирает APK и выкладывает его в Releases, затем проверяет на Android-эмуляторе.
+# Собирает APK, проверяет его на Android-эмуляторе и только потом выкладывает в Releases.
 # Постоянная ссылка: https://github.com/Iluxy01/Generator/releases/latest/download/Holst.apk
 name: Сборка
 
@@ -8,7 +8,6 @@ on:
     paths-ignore:
       - 'ci/DIAGNOSE'
       - 'ci/probe.py'
-      - 'ci/stress.py'
       - '.github/workflows/diagnose.yml'
   workflow_dispatch:
 
@@ -39,40 +38,24 @@ jobs:
           name: holst-apk
           path: Holst.apk
 
-      - name: Релиз
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk
-          name: Холст
-          make_latest: true
-          files: Holst.apk
-          body: |
-            Открой эту страницу на телефоне, скачай Holst.apk и установи.
-            Друг ставит то же самое и вводит твой код.
-
   e2e:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           name: holst-apk
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - run: pip install websocket-client cryptography pillow
-
       - name: Включить KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-
       - name: Проверка на эмуляторе
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -84,8 +67,61 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none
           script: python3 ci/e2e.py Holst.apk
 
-      - uses: actions/upload-artifact@v4
-        if: always()
+  stress:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: e2e-results
-          path: ci/out
+          name: holst-apk
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install websocket-client cryptography pillow
+      - name: Включить KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Стресс-тест
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none
+          script: cd ci && python3 stress.py ../Holst.apk --strict
+      # Скриншоты и журнал: артефакты отсюда недоступны, а ветку можно прочитать через git.
+      - name: Сохранить результаты в ветку
+        if: always()
+        run: |
+          cd ci/out
+          git init -q -b e2e-results
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git add -A
+          git commit -qm "Результаты проверки ${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-results
+
+  release:
+    # Новая версия попадает к людям, только если прошла обе проверки.
+    needs: [build, e2e, stress]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: holst-apk
+      - name: Релиз
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk
+          name: Холст
+          make_latest: true
+          files: Holst.apk
+          body: |
+            Открой эту страницу на телефоне, скачай Holst.apk и установи.
+            Друг ставит то же самое и вводит твой код. Обновлять нужно на обоих телефонах.

@@ -77,6 +77,35 @@ final class Crypto {
         return r;
     }
 
+    /**
+     * Заранее посчитанные кратные G по четыре бита: подпись становится в несколько раз быстрее,
+     * а значит и живые штрихи не копятся в очереди на отправку.
+     */
+    private static final class GTable {
+        static final Pt[][] T = build();
+
+        private static Pt[][] build() {
+            Pt[][] t = new Pt[64][16];
+            Pt base = g();
+            for (int i = 0; i < 64; i++) {
+                t[i][1] = base;
+                for (int j = 2; j < 16; j++) t[i][j] = add(t[i][j - 1], base);
+                for (int d = 0; d < 4; d++) base = dbl(base);
+            }
+            return t;
+        }
+    }
+
+    private static Pt mulG(BigInteger k) {
+        Pt r = null;
+        for (int i = 0; i < 64; i++) {
+            int digit = (k.testBit(i * 4) ? 1 : 0) | (k.testBit(i * 4 + 1) ? 2 : 0)
+                    | (k.testBit(i * 4 + 2) ? 4 : 0) | (k.testBit(i * 4 + 3) ? 8 : 0);
+            if (digit != 0) r = add(r, GTable.T[i][digit]);
+        }
+        return r;
+    }
+
     /** Возвращает {x, y} в обычных координатах. */
     private static BigInteger[] affine(Pt p) {
         BigInteger zi = p.z.modInverse(P);
@@ -121,31 +150,44 @@ final class Crypto {
 
     /** Открытый ключ BIP-340: только координата x. */
     static byte[] publicKey(byte[] secret) {
-        return bytes32(affine(mul(num(secret), g()))[0]);
+        return bytes32(affine(mulG(num(secret)))[0]);
+    }
+
+    /** Подпись одним ключом: открытая часть считается один раз. */
+    static final class Signer {
+        private final BigInteger d;
+        private final byte[] px;
+
+        Signer(byte[] secret) {
+            BigInteger d0 = num(secret);
+            if (d0.signum() == 0 || d0.compareTo(N) >= 0) {
+                throw new IllegalArgumentException("bad key");
+            }
+            BigInteger[] pub = affine(mulG(d0));
+            d = pub[1].testBit(0) ? N.subtract(d0) : d0;
+            px = bytes32(pub[0]);
+        }
+
+        byte[] sign(byte[] msg32, byte[] aux32) {
+            byte[] t = bytes32(d);
+            byte[] auxHash = tagged("BIP0340/aux", aux32);
+            for (int i = 0; i < 32; i++) t[i] ^= auxHash[i];
+            BigInteger k0 = num(tagged("BIP0340/nonce", t, px, msg32)).mod(N);
+            if (k0.signum() == 0) throw new IllegalStateException("zero nonce");
+            BigInteger[] r = affine(mulG(k0));
+            BigInteger k = r[1].testBit(0) ? N.subtract(k0) : k0;
+            byte[] rx = bytes32(r[0]);
+            BigInteger e = num(tagged("BIP0340/challenge", rx, px, msg32)).mod(N);
+            byte[] s = bytes32(k.add(e.multiply(d)).mod(N));
+            byte[] sig = new byte[64];
+            System.arraycopy(rx, 0, sig, 0, 32);
+            System.arraycopy(s, 0, sig, 32, 32);
+            return sig;
+        }
     }
 
     static byte[] sign(byte[] secret, byte[] msg32, byte[] aux32) {
-        BigInteger d0 = num(secret);
-        if (d0.signum() == 0 || d0.compareTo(N) >= 0) {
-            throw new IllegalArgumentException("bad key");
-        }
-        BigInteger[] pub = affine(mul(d0, g()));
-        BigInteger d = pub[1].testBit(0) ? N.subtract(d0) : d0;
-        byte[] px = bytes32(pub[0]);
-        byte[] t = bytes32(d);
-        byte[] auxHash = tagged("BIP0340/aux", aux32);
-        for (int i = 0; i < 32; i++) t[i] ^= auxHash[i];
-        BigInteger k0 = num(tagged("BIP0340/nonce", t, px, msg32)).mod(N);
-        if (k0.signum() == 0) throw new IllegalStateException("zero nonce");
-        BigInteger[] r = affine(mul(k0, g()));
-        BigInteger k = r[1].testBit(0) ? N.subtract(k0) : k0;
-        byte[] rx = bytes32(r[0]);
-        BigInteger e = num(tagged("BIP0340/challenge", rx, px, msg32)).mod(N);
-        byte[] s = bytes32(k.add(e.multiply(d)).mod(N));
-        byte[] sig = new byte[64];
-        System.arraycopy(rx, 0, sig, 0, 32);
-        System.arraycopy(s, 0, sig, 32, 32);
-        return sig;
+        return new Signer(secret).sign(msg32, aux32);
     }
 
     static boolean verify(byte[] pub, byte[] msg32, byte[] sig) {

@@ -3,8 +3,10 @@ package app.holst;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -19,7 +21,8 @@ import org.json.JSONObject;
 
 /**
  * Связь через бесплатные публичные ретрансляторы Nostr. Своего сервера нет: штрих уходит сразу в
- * несколько ретрансляторов, друг получает его из первого живого.
+ * несколько ретрансляторов, друг получает его из первого живого. Мобильная связь рвётся незаметно,
+ * поэтому каждое соединение проверяется, а не считается живым только потому, что его не закрыли.
  */
 final class RelayPool {
     private static final String TAG = "Holst";
@@ -30,13 +33,20 @@ final class RelayPool {
         "wss://nostr.mom",
         "wss://relay.snort.social",
         "wss://nostr.data.haus",
+        "wss://nostr-pub.wellorder.net",
+        "wss://relay.sigit.io",
+        "wss://nostr-01.yakihonne.com",
     };
 
     static final int KIND_STORED = 30078;
     static final int KIND_LIVE = 20078;
 
+    /** Живые куски идут только через самые быстрые ретрансляторы: иначе нас ограничат за частоту. */
+    private static final int LIVE_FANOUT = 3;
+    private static final long CONGESTED_BYTES = 256 * 1024;
+
     interface Listener {
-        void onConnOpen(Conn c);
+        void onConnOpen();
 
         void onEvent(int kind, long createdAt, String content);
 
@@ -54,18 +64,19 @@ final class RelayPool {
             new LinkedHashMap<String, Boolean>(512, 0.75f, false) {
                 @Override
                 protected boolean removeEldestEntry(Map.Entry<String, Boolean> e) {
-                    return size() > 4096;
+                    return size() > 8192;
                 }
             });
     private volatile long since;
     private volatile boolean stopped;
+    private volatile boolean fast;
 
     RelayPool(Listener listener, String pubHex) {
         this.listener = listener;
         this.pubHex = pubHex;
         this.http = new OkHttpClient.Builder()
-                .pingInterval(20, TimeUnit.SECONDS)
-                .connectTimeout(12, TimeUnit.SECONDS)
+                .pingInterval(25, TimeUnit.SECONDS)
+                .connectTimeout(10, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build();
     }
@@ -77,6 +88,7 @@ final class RelayPool {
             conns.add(c);
             c.connect();
         }
+        timer.schedule(this::healthTick, 2, TimeUnit.SECONDS);
     }
 
     void stop() {
@@ -86,14 +98,35 @@ final class RelayPool {
         http.dispatcher().executorService().shutdown();
     }
 
-    /** Мы могли проспать: просим пропущенное заново и оживляем закрытые соединения. */
+    /** Холст на экране: проверяем соединения часто. В остальное время бережём батарею. */
+    void setFast(boolean v) {
+        fast = v;
+    }
+
+    private void healthTick() {
+        if (stopped) return;
+        long now = System.currentTimeMillis();
+        try {
+            for (Conn c : conns) c.checkHealth(now);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "health check failed", e);
+        }
+        if (!stopped) timer.schedule(this::healthTick, fast ? 2 : 15, TimeUnit.SECONDS);
+    }
+
+    /** Мы могли проспать: просим пропущенное, оживляем закрытые и проверяем открытые соединения. */
     void catchUp(long sinceSec) {
         since = sinceSec;
         if (stopped) return;
         timer.execute(() -> {
+            long now = System.currentTimeMillis();
             for (Conn c : conns) {
-                if (c.open) c.subscribe();
-                else c.connectNow();
+                if (c.open) {
+                    c.subscribe();
+                    c.probeNow(now);
+                } else {
+                    c.connectNow();
+                }
             }
         });
     }
@@ -109,9 +142,25 @@ final class RelayPool {
         seen.put(eventId, Boolean.TRUE);
     }
 
+    /** Готовые штрихи и стирания: всем доступным ретрансляторам. */
     void publish(String eventJson) {
         String msg = "[\"EVENT\"," + eventJson + "]";
-        for (Conn c : conns) c.send(msg);
+        long now = System.currentTimeMillis();
+        for (Conn c : conns) {
+            if (!c.cooling(now)) c.send(msg);
+        }
+    }
+
+    /** Живой кусок: только через самые быстрые, не ограничившие нас ретрансляторы. */
+    void publishLive(String eventJson) {
+        String msg = "[\"EVENT\"," + eventJson + "]";
+        long now = System.currentTimeMillis();
+        List<Conn> best = new ArrayList<>(conns.size());
+        for (Conn c : conns) {
+            if (c.open && !c.cooling(now) && !c.congested()) best.add(c);
+        }
+        best.sort(Comparator.comparingLong((Conn c) -> c.rttMs));
+        for (int i = 0; i < Math.min(LIVE_FANOUT, best.size()); i++) best.get(i).send(msg);
     }
 
     private void notifyStatus() {
@@ -122,20 +171,43 @@ final class RelayPool {
         listener.onStatus(open, conns.size());
     }
 
+    private static boolean isRateLimit(String message) {
+        if (message == null) return false;
+        String m = message.toLowerCase(Locale.ROOT);
+        return m.contains("rate") || m.contains("too many") || m.contains("slow down") || m.contains("banned")
+                || m.contains("noting too much");
+    }
+
     final class Conn extends WebSocketListener {
         final String url;
         private volatile WebSocket ws;
         volatile boolean open;
         private int attempt;
         private boolean connecting;
+        private volatile long lastRx;
+        private volatile long probeSentAt;
+        private volatile long connectStartedAt;
+        volatile long rttMs = 5000;
+        private volatile long coolUntil;
+        private volatile long coolStepMs = 15_000;
 
         Conn(String url) {
             this.url = url;
         }
 
+        boolean cooling(long now) {
+            return now < coolUntil;
+        }
+
+        boolean congested() {
+            WebSocket w = ws;
+            return w != null && w.queueSize() > 32 * 1024;
+        }
+
         synchronized void connect() {
             if (stopped || connecting || open) return;
             connecting = true;
+            connectStartedAt = System.currentTimeMillis();
             ws = http.newWebSocket(new Request.Builder().url(url).header("User-Agent", "Holst").build(), this);
         }
 
@@ -149,6 +221,7 @@ final class RelayPool {
             ws = null;
             open = false;
             connecting = false;
+            probeSentAt = 0;
             if (old != null) old.cancel();
             attempt = 0;
             connect();
@@ -164,7 +237,10 @@ final class RelayPool {
 
         void send(String msg) {
             WebSocket w = ws;
-            if (open && w != null) w.send(msg);
+            if (open && w != null && w.send(msg) && probeSentAt == 0) {
+                // На всё, кроме закрытия подписки, ретранслятор обязан ответить: молчание — плохой знак.
+                probeSentAt = System.currentTimeMillis();
+            }
         }
 
         void subscribe() {
@@ -176,23 +252,59 @@ final class RelayPool {
             send(live);
         }
 
+        /** Пустой запрос: живой ретранслятор ответит сразу, мёртвое соединение промолчит. */
+        void probeNow(long now) {
+            probeSentAt = now;
+            long future = now / 1000 + 86400;
+            send("[\"REQ\",\"hb\",{\"authors\":[\"" + pubHex + "\"],\"kinds\":[" + KIND_STORED
+                    + "],\"since\":" + future + ",\"limit\":1}]");
+        }
+
+        void checkHealth(long now) {
+            if (!open) return;
+            WebSocket w = ws;
+            if (w != null && w.queueSize() > CONGESTED_BYTES) {
+                Log.d(TAG, "relay congested " + url);
+                restart();
+                return;
+            }
+            long sent = probeSentAt;
+            if (sent != 0) {
+                if (now - sent > (fast ? 6000 : 20000)) {
+                    Log.d(TAG, "relay silent, reconnecting " + url);
+                    restart();
+                }
+                return;
+            }
+            if (now - lastRx > (fast ? 4000 : 60000)) probeNow(now);
+        }
+
         @Override
         public void onOpen(WebSocket webSocket, Response response) {
+            long now = System.currentTimeMillis();
             synchronized (this) {
                 if (webSocket != ws) return;
                 open = true;
                 connecting = false;
                 attempt = 0;
+                lastRx = now;
+                probeSentAt = 0;
+                rttMs = Math.max(1, now - connectStartedAt);
             }
             Log.d(TAG, "relay open " + url);
             subscribe();
             notifyStatus();
-            listener.onConnOpen(this);
+            listener.onConnOpen();
         }
 
         @Override
         public void onMessage(WebSocket webSocket, String text) {
             if (webSocket != ws) return;
+            long now = System.currentTimeMillis();
+            lastRx = now;
+            // Любой ответ означает, что соединение живо.
+            long sent = probeSentAt;
+            probeSentAt = 0;
             try {
                 JSONArray a = new JSONArray(text);
                 String type = a.getString(0);
@@ -202,13 +314,31 @@ final class RelayPool {
                     if (seen.put(e.getString("id"), Boolean.TRUE) != null) return;
                     listener.onEvent(e.getInt("kind"), e.getLong("created_at"), e.getString("content"));
                 } else if ("OK".equals(type)) {
-                    listener.onOk(a.getString(1), a.getBoolean(2), a.optString(3), url);
+                    boolean ok = a.getBoolean(2);
+                    String message = a.optString(3);
+                    if (ok) coolStepMs = 15_000;
+                    else if (isRateLimit(message)) coolDown(now, message);
+                    listener.onOk(a.getString(1), ok, message, url);
+                } else if ("EOSE".equals(type)) {
+                    if ("hb".equals(a.optString(1))) {
+                        if (sent != 0) rttMs = (rttMs * 2 + (now - sent)) / 3;
+                        WebSocket w = ws;
+                        if (w != null) w.send("[\"CLOSE\",\"hb\"]");
+                    }
                 } else if ("NOTICE".equals(type) || "CLOSED".equals(type)) {
                     Log.d(TAG, url + ": " + text);
+                    if (isRateLimit(text)) coolDown(now, text);
                 }
             } catch (Exception e) {
                 Log.d(TAG, "bad message from " + url + ": " + e);
             }
+        }
+
+        private void coolDown(long now, String why) {
+            if (now < coolUntil) return;
+            coolUntil = now + coolStepMs;
+            Log.d(TAG, "cooling " + url + " for " + coolStepMs + "ms: " + why);
+            coolStepMs = Math.min(coolStepMs * 2, 300_000);
         }
 
         @Override
@@ -233,8 +363,9 @@ final class RelayPool {
                 open = false;
                 connecting = false;
                 ws = null;
+                probeSentAt = 0;
                 attempt = Math.min(attempt + 1, 6);
-                delay = Math.min(90, 2L << attempt);
+                delay = Math.min(fast ? 12 : 90, 1L << attempt);
             }
             Log.d(TAG, "relay down " + url + ": " + why);
             notifyStatus();

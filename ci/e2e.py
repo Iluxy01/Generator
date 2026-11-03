@@ -26,6 +26,9 @@ RELAYS = [
     "wss://nostr.mom",
     "wss://relay.snort.social",
     "wss://nostr.data.haus",
+    "wss://nostr-pub.wellorder.net",
+    "wss://relay.sigit.io",
+    "wss://nostr-01.yakihonne.com",
 ]
 KIND_STORED, KIND_LIVE = 30078, 20078
 results = []

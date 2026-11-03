@@ -18,8 +18,12 @@ public final class App extends Application {
     final Handler main = new Handler(Looper.getMainLooper());
     /** Подписи и сеть: подпись занимает миллисекунды, но главный поток она тормозить не должна. */
     final ExecutorService net = Executors.newSingleThreadExecutor();
+    /** Живые штрихи и сверка листов: не должны стоять в очереди за повторной отправкой. */
+    final ExecutorService live = Executors.newSingleThreadExecutor();
     /** Сохранение листа, импорт картинки, запись обоев. */
     final ExecutorService disk = Executors.newSingleThreadExecutor();
+    /** Перестроение картинки: главный поток занят касаниями. */
+    final ExecutorService render = Executors.newSingleThreadExecutor();
     Prefs prefs;
     Repo repo;
     Sync sync;

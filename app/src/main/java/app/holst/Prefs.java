@@ -19,6 +19,16 @@ final class Prefs {
         return code;
     }
 
+    /** Отличает этот телефон от других на том же листе. */
+    String deviceId() {
+        String id = sp.getString("device", null);
+        if (id == null) {
+            id = Stroke.newId();
+            sp.edit().putString("device", id).apply();
+        }
+        return id;
+    }
+
     void setCode(String code) {
         sp.edit().putString("code", code).apply();
     }

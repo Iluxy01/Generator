@@ -17,8 +17,12 @@ final class Stroke {
     final boolean erase;
     final int[] pts;
     final boolean mine;
+    /** Сколько миллисекунд рисовался: по этому времени штрих проигрывается у друга. */
+    final int duration;
+    /** Когда штрих появился на этом телефоне. */
+    final long seenMs = System.currentTimeMillis();
 
-    Stroke(String id, long t, long sec, int color, int width, boolean erase, int[] pts, boolean mine) {
+    Stroke(String id, long t, long sec, int color, int width, boolean erase, int[] pts, boolean mine, int duration) {
         this.id = id;
         this.t = t;
         this.sec = sec;
@@ -27,6 +31,7 @@ final class Stroke {
         this.erase = erase;
         this.pts = pts;
         this.mine = mine;
+        this.duration = duration;
     }
 
     static String newId() {
@@ -42,6 +47,7 @@ final class Stroke {
                 .append(",\"c\":").append(color)
                 .append(",\"w\":").append(width)
                 .append(",\"e\":").append(erase ? 1 : 0)
+                .append(",\"u\":").append(duration)
                 .append(",\"p\":");
         appendDelta(sb, pts, pts.length);
         return sb.append('}').toString();
@@ -49,7 +55,7 @@ final class Stroke {
 
     static Stroke parse(JSONObject o, long sec, boolean mine) throws JSONException {
         return new Stroke(o.getString("i"), o.getLong("t"), sec, o.getInt("c"), o.getInt("w"),
-                o.optInt("e") != 0, readDelta(o.getJSONArray("p")), mine);
+                o.optInt("e") != 0, readDelta(o.getJSONArray("p")), mine, o.optInt("u"));
     }
 
     /** Первая точка целиком, дальше разности: так сообщения в разы короче. */
