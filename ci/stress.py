@@ -226,7 +226,8 @@ def silent_disconnect(c):
     n = kill_existing_sockets()
     print("  silently killed sockets again:", n, flush=True)
     marker = time.time()
-    friend.stroke(0xFF00FF5A, 3000)
+    # Настоящий телефон друга уже знает о стирании, поэтому его штрих новее. Здесь это задаём явно.
+    friend.stroke(0xFF00FF5A, 3000, t=int((time.time() + 260) * 1000))
     arrived = -1
     for _ in range(70):
         time.sleep(1)

@@ -165,14 +165,14 @@ class Friend:
                 print(f"  send failed {url}: {e}", flush=True)
         return ev["id"]
 
-    def stroke(self, color, y_from_center, width=300, x0=800, x1=9200):
+    def stroke(self, color, y_from_center, width=300, x0=800, x1=9200, t=None):
         sid = secrets.token_hex(8)
         pts = []
         px, py = 0, 0
         for x in range(x0, x1, 400):
             pts += [x - px, y_from_center - py]
             px, py = x, y_from_center
-        self.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": int(time.time() * 1000), "c": color, "w": width, "e": 0, "p": pts})
+        self.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": t or int(time.time() * 1000), "c": color, "w": width, "e": 0, "p": pts})
         return sid
 
     def wait_for(self, predicate, timeout=30):
