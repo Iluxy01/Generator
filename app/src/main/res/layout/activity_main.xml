@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ink"
+    android:fillViewport="true"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="serif"
+            android:text="@string/app_name"
+            android:textColor="@color/paper"
+            android:textSize="42sp" />
+
+        <TextView
+            style="@style/Muted"
+            android:layout_marginTop="6dp"
+            android:text="@string/tagline"
+            android:textSize="15sp" />
+
+        <app.holst.PreviewView
+            android:id="@+id/preview"
+            android:layout_width="wrap_content"
+            android:layout_height="330dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="22dp"
+            android:background="@drawable/bg_preview" />
+
+        <TextView
+            android:id="@+id/step_title"
+            style="@style/CardTitle"
+            android:layout_marginTop="22dp"
+            android:gravity="center_horizontal"
+            android:text="@string/step_pick_bg" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/pick"
+                style="@style/BtnPrimary"
+                android:layout_width="0dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="@string/pick_picture" />
+
+            <Button
+                android:id="@+id/blank"
+                style="@style/BtnSecondary"
+                android:layout_width="0dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="@string/blank_sheet" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/Card">
+
+            <TextView
+                style="@style/CardTitle"
+                android:text="@string/friend_card" />
+
+            <TextView
+                style="@style/Muted"
+                android:layout_marginTop="2dp"
+                android:text="@string/friend_card_hint" />
+
+            <TextView
+                android:id="@+id/code"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:fontFamily="monospace"
+                android:textColor="@color/marker"
+                android:textIsSelectable="true"
+                android:textSize="27sp" />
+
+            <TextView
+                android:id="@+id/status"
+                style="@style/Muted"
+                android:layout_marginTop="6dp"
+                android:drawablePadding="8dp"
+                android:gravity="center_vertical"
+                android:text="@string/status_offline" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/share"
+                    style="@style/BtnSecondary"
+                    android:layout_width="0dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/share" />
+
+                <Button
+                    android:id="@+id/join"
+                    style="@style/BtnSecondary"
+                    android:layout_width="0dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/join" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/permissions_card"
+            style="@style/Card"
+            android:visibility="gone">
+
+            <TextView
+                style="@style/CardTitle"
+                android:text="@string/permissions_card" />
+
+            <LinearLayout style="@style/PermRow">
+
+                <TextView
+                    style="@style/PermLabel"
+                    android:text="@string/perm_overlay" />
+
+                <Button
+                    android:id="@+id/perm_overlay"
+                    style="@style/PermButton" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/PermRow">
+
+                <TextView
+                    style="@style/PermLabel"
+                    android:text="@string/perm_notifications" />
+
+                <Button
+                    android:id="@+id/perm_notifications"
+                    style="@style/PermButton" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/PermRow">
+
+                <TextView
+                    style="@style/PermLabel"
+                    android:text="@string/perm_battery" />
+
+                <Button
+                    android:id="@+id/perm_battery"
+                    style="@style/PermButton" />
+            </LinearLayout>
+
+            <TextView
+                style="@style/Muted"
+                android:layout_marginTop="14dp"
+                android:text="@string/perm_gray_hint"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/oem_hint"
+                style="@style/Muted"
+                android:layout_marginTop="6dp"
+                android:text="@string/perm_xiaomi_hint"
+                android:textSize="13sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/Card">
+
+            <Switch
+                android:id="@+id/enabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/enabled"
+                android:textColor="@color/paper"
+                android:textSize="16sp" />
+
+            <TextView
+                style="@style/Muted"
+                android:layout_marginTop="10dp"
+                android:text="@string/how_to" />
+
+            <Button
+                android:id="@+id/try_it"
+                style="@style/BtnSecondary"
+                android:layout_width="match_parent"
+                android:layout_marginTop="14dp"
+                android:text="@string/try_it" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

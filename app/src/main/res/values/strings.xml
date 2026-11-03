@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Холст</string>
+    <string name="tagline">Твой экран блокировки — общий лист с другом. Рисуешь прямо на обоях, и рисунок сразу появляется у него. А его — у тебя.</string>
+
+    <string name="step_pick_bg">Что положить под рисунки?</string>
+    <string name="step_change_bg">Обои под рисунками</string>
+    <string name="pick_picture">Выбрать картинку</string>
+    <string name="blank_sheet">Чистый лист</string>
+    <string name="picture_failed">Не получилось открыть эту картинку</string>
+
+    <string name="friend_card">Общий лист</string>
+    <string name="friend_card_hint">У кого одинаковый код, у того одинаковый рисунок</string>
+    <string name="status_online">На связи: %1$d из %2$d каналов</string>
+    <string name="status_offline">Подключаюсь…</string>
+    <string name="share">Отправить другу</string>
+    <string name="join">Ввести код друга</string>
+    <string name="share_text">Давай рисовать друг у друга на экране блокировки! Поставь Холст: %1$s\nИ введи мой код: %2$s</string>
+
+    <string name="join_title">Код друга</string>
+    <string name="join_message">Текущий рисунок на этом телефоне заменится вашим общим листом.</string>
+    <string name="join_hint">12 цифр</string>
+    <string name="join_ok">Присоединиться</string>
+    <string name="join_bad">В коде должно быть 12 цифр</string>
+    <string name="join_done">Готово: теперь лист у вас общий</string>
+    <string name="cancel">Отмена</string>
+
+    <string name="permissions_card">Чтобы холст открывался сам</string>
+    <string name="perm_overlay">Показывать холст на экране блокировки</string>
+    <string name="perm_notifications">Сообщать, когда друг нарисовал</string>
+    <string name="perm_battery">Оставаться на связи в фоне</string>
+    <string name="perm_allow">Разрешить</string>
+    <string name="perm_ready">Готово</string>
+    <string name="perm_gray_hint">Настройка серая и не нажимается? Открой Настройки → Приложения → Холст → ⋮ → «Разрешить ограниченные настройки».</string>
+    <string name="perm_xiaomi_hint">На Xiaomi ещё включи в настройках приложения «Экран блокировки» и «Автозапуск».</string>
+
+    <string name="overlay_title">Последний шаг</string>
+    <string name="overlay_message">Без этого разрешения Android не даст холсту открываться на экране блокировки. Найди в списке Холст и включи переключатель.</string>
+    <string name="later">Позже</string>
+    <string name="open_settings">Открыть настройки</string>
+
+    <string name="enabled">Холст на экране блокировки</string>
+    <string name="try_it">Посмотреть, как это выглядит</string>
+    <string name="how_to">Заблокируй телефон и снова включи экран: рисуй пальцем прямо на обоях. Чтобы разблокировать, потяни полоску внизу вверх.</string>
+    <string name="canvas_off">Холст выключен. На экране блокировки теперь обои рабочего стола.</string>
+
+    <string name="unlock_hint">Потяни вверх, чтобы открыть</string>
+    <string name="friend_drawing">Друг рисует…</string>
+    <string name="clear_all">Стереть всё</string>
+    <string name="clear_confirm">Точно стереть у обоих?</string>
+    <string name="undo">Отменить</string>
+    <string name="eraser">Ластик</string>
+    <string name="brush">Кисть</string>
+
+    <string name="channel_service">Холст включён</string>
+    <string name="channel_friend">Друг нарисовал</string>
+    <string name="channel_layer">Показ холста</string>
+    <string name="service_title">Холст включён</string>
+    <string name="service_text">Друг может рисовать на твоих обоях</string>
+    <string name="friend_title">Друг рисует на твоих обоях</string>
+    <string name="friend_text">Загляни на экран блокировки</string>
+    <string name="layer_notification">Открываю холст</string>
+</resources>

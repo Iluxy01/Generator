@@ -1,0 +1,86 @@
+# Собирает APK и выкладывает его в Releases, затем проверяет на Android-эмуляторе.
+# Постоянная ссылка: https://github.com/Iluxy01/Generator/releases/latest/download/Holst.apk
+name: Сборка
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Тесты и сборка
+        run: ./gradlew --no-daemon --stacktrace testReleaseUnitTest assembleRelease
+
+      - run: cp app/build/outputs/apk/release/app-release.apk Holst.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holst-apk
+          path: Holst.apk
+
+      - name: Релиз
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk
+          name: Холст
+          make_latest: true
+          files: Holst.apk
+          body: |
+            Открой эту страницу на телефоне, скачай Holst.apk и установи.
+            Друг ставит то же самое и вводит твой код.
+
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: holst-apk
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install websocket-client cryptography pillow
+
+      - name: Включить KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Проверка на эмуляторе
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none
+          script: python3 ci/e2e.py Holst.apk
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: ci/out
