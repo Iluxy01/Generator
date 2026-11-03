@@ -138,6 +138,7 @@ public final class CanvasService extends Service implements Repo.Listener {
     }
 
     private void onScreenOff() {
+        cancelLayerNotification();
         // Экран погас: обои должны быть свежими ещё до следующего включения.
         app.main.removeCallbacks(writeWallpaper);
         writeWallpaperNow();
@@ -184,6 +185,7 @@ public final class CanvasService extends Service implements Repo.Listener {
                 .setFullScreenIntent(pi, true)
                 .setContentIntent(pi)
                 .setAutoCancel(true)
+                .setTimeoutAfter(4000)
                 .build();
         try {
             nm.notify(ID_LAYER, n);

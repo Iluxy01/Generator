@@ -383,7 +383,7 @@ def main():
     diag("after back")
     check("слой закрылся по «назад»", not on_layer(), top_activity())
     path = shot("09_system_keyguard")
-    wall_px = count_color(path, colour)
+    wall_px = count_color(path, (205, 0, 160), tol=55)  # система затемняет обои на экране блокировки
     check("рисунок друга впечатан в настоящие обои экрана блокировки", wall_px > 1000, f"{wall_px} точек")
     print(sh("shell", "dumpsys", "wallpaper")[:1500], flush=True)
 
@@ -499,7 +499,7 @@ def main():
         sh("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(4)
         path = shot("21_system_keyguard_with_picture")
-        check("картинка попала в настоящие обои", count_color(path, (240, 120, 20)) > 20000, hard=False)
+        check("картинка попала в настоящие обои", count_color(path, (190, 95, 15), tol=45) > 20000, hard=False)
 
     print("ops accepted per relay:", flush=True)
     per = {}
