@@ -84,3 +84,15 @@ jobs:
         with:
           name: e2e-results
           path: ci/out
+
+      # Скриншоты и журнал кладутся в отдельную ветку, чтобы их можно было посмотреть через git.
+      - name: Сохранить результаты в ветку
+        if: always()
+        run: |
+          cd ci/out
+          git init -q -b e2e-results
+          git config user.name ci
+          git config user.email ci@users.noreply.github.com
+          git add -A
+          git commit -qm "Результаты проверки ${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-results

@@ -25,9 +25,8 @@ RELAYS = [
     "wss://nos.lol",
     "wss://nostr.mom",
     "wss://relay.snort.social",
-    "wss://nostr-pub.wellorder.net",
     "wss://nostr.oxtr.dev",
-    "wss://offchain.pub",
+    "wss://relay.damus.io",
 ]
 KIND_STORED, KIND_LIVE = 30078, 20078
 results = []
@@ -226,8 +225,9 @@ def center(node):
 
 def find_text(text, contains=False):
     for node in ui_nodes():
-        t = node.get("text") or ""
-        if (text in t) if contains else (t == text):
+        t = (node.get("text") or "").casefold()
+        want = text.casefold()
+        if (want in t) if contains else (t == want):
             return node
     return None
 
@@ -254,6 +254,13 @@ def top_activity():
     out = sh("shell", "dumpsys", "activity", "activities")
     m = re.search(r"topResumedActivity=.*?\{[^}]*\s(\S+/\S+)", out) or re.search(r"ResumedActivity.*?\s(\S+/\S+)", out)
     return m.group(1) if m else ""
+
+
+def diag(label):
+    win = sh("shell", "dumpsys", "window")
+    lines = [l.strip() for l in win.splitlines() if re.search(r"mCurrentFocus|mFocusedApp|mDreamingLockscreen|mShowingDream|isKeyguardShowing|mScreenOn", l)]
+    power = [l.strip() for l in sh("shell", "dumpsys", "power").splitlines() if "mWakefulness=" in l]
+    print(f"  diag {label}: top={top_activity()} {lines[:5]} {power[:1]}", flush=True)
 
 
 def on_layer():
@@ -334,11 +341,13 @@ def main():
     print("keyguard markers:", keyguard, flush=True)
     check("при включении экрана сверху холст", on_layer(), top_activity())
     path = shot("05_lock_layer")
+    diag("on layer")
 
     # ---- Рисуем на экране блокировки: это должно дойти до друга ----
     wave = [(int(W * (0.12 + 0.76 * i / 40)), int(H * 0.55 + (H * 0.06) * ((-1) ** (i // 5)) * ((i % 5) / 5))) for i in range(41)]
     draw_curve(wave)
     time.sleep(2)
+    diag("after draw")
     path = shot("06_i_drew")
     white_after = count_color(path, (255, 255, 255), tol=20, box=(0, int(H * 0.45), W, int(H * 0.65)))
     check("свой штрих виден на холсте", white_after > 500, f"{white_after} белых точек")

@@ -29,9 +29,8 @@ final class RelayPool {
         "wss://nos.lol",
         "wss://nostr.mom",
         "wss://relay.snort.social",
-        "wss://nostr-pub.wellorder.net",
         "wss://nostr.oxtr.dev",
-        "wss://offchain.pub",
+        "wss://relay.damus.io",
     };
 
     static final int KIND_STORED = 30078;
