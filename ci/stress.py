@@ -344,8 +344,9 @@ def home_screen(c):
     sh("logcat", "-c")
     sh("shell", "dumpsys", "gfxinfo", launcher, "reset")
     base = int((time.time() + 600) * 1000)
-    stop_at = time.time() + 45
+    stop_at = time.time() + 60
     i = 0
+    next_stroke = 0
     while time.time() < stop_at:
         sid = secrets.token_hex(8)
         pts = []
@@ -354,8 +355,11 @@ def home_screen(c):
             x, y = 1000 + j * 250, -3000 + (i % 30) * 200
             pts += [x - px, y - py]
             px, py = x, y
-        friend.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": base + i, "c": 0xFF32D74B, "w": 120, "e": 0, "p": pts, "u": 400})
-        i += 1
+        # Штрих раз в 8 секунд: друг рисует не спеша, между штрихами есть паузы.
+        if time.time() >= next_stroke:
+            friend.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": base + i, "c": 0xFF32D74B, "w": 120, "e": 0, "p": pts, "u": 400})
+            i += 1
+            next_stroke = time.time() + 8
         swipe(int(W * .85), H // 2, int(W * .15), H // 2, 250)
         time.sleep(.4)
         swipe(int(W * .15), H // 2, int(W * .85), H // 2, 250)
@@ -367,6 +371,19 @@ def home_screen(c):
     keys = {"total": r"Total frames rendered: (\d+)", "janky": r"Janky frames: (\d+)", "p50": r"50th percentile: (\d+)ms",
             "p90": r"90th percentile: (\d+)ms", "p99": r"99th percentile: (\d+)ms"}
     metric("home_screen_frames", {k: (int(m.group(1)) if (m := re.search(v, out)) else -1) for k, v in keys.items()})
+
+    # Контроль: те же движения, но приложение полностью остановлено.
+    sh("shell", "am", "force-stop", PKG)
+    time.sleep(5)
+    sh("shell", "dumpsys", "gfxinfo", launcher, "reset")
+    stop_at = time.time() + 40
+    while time.time() < stop_at:
+        swipe(int(W * .85), H // 2, int(W * .15), H // 2, 250)
+        time.sleep(.4)
+        swipe(int(W * .15), H // 2, int(W * .85), H // 2, 250)
+        time.sleep(.4)
+    out = sh("shell", "dumpsys", "gfxinfo", launcher)
+    metric("home_screen_frames_app_stopped", {k: (int(m.group(1)) if (m := re.search(v, out)) else -1) for k, v in keys.items()})
 
 
 def main():

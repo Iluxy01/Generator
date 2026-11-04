@@ -248,6 +248,15 @@ def dp_px():
     return int(m[-1]) / 160
 
 
+def lock_button_xy():
+    """Где сейчас замок: положение зависит от панели навигации."""
+    for node in ui_nodes():
+        if "Заблокировать холст" in (node.get("content-desc") or ""):
+            return center(node)
+    W, H = screen_size()
+    return W - int(89 * dp_px()), int(H - 62 * dp_px())
+
+
 def open_picker():
     """Открывает выбор картинки: в новой версии через нажатие на вид холста."""
     if tap_text("Выбрать картинку", timeout=3, scroll=False):
@@ -393,6 +402,11 @@ def main():
     check("после копирования остаёмся в приложении", "MainActivity" in top_activity(), top_activity())
     tap_text("Ввести код", timeout=6, scroll=False)
     time.sleep(1.5)
+    for n in ui_nodes():
+        if n.get("class") == "android.widget.EditText":
+            tap_xy(*center(n))
+            break
+    time.sleep(1)
     sh("shell", "input", "keyevent", "279")  # вставить из буфера обмена
     time.sleep(1)
     pasted = [n.get("text") for n in ui_nodes() if n.get("class") == "android.widget.EditText"]
@@ -467,7 +481,7 @@ def main():
     check("после повторного включения снова холст", on_layer(), top_activity())
 
     # ---- Кнопка блокировки: случайные жесты не закрывают холст и не вызывают ввод пароля ----
-    lock_x, lock_y = W - int(89 * W / 411), int(H - 62 * W / 411)
+    lock_x, lock_y = lock_button_xy()
     tap_xy(lock_x, lock_y)
     time.sleep(2)
     tap_text("Got it", timeout=3, scroll=False)

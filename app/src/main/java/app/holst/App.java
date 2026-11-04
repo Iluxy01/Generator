@@ -62,6 +62,10 @@ public final class App extends Application {
         wallpaperDirty = true;
     }
 
+    boolean isWallpaperDirty() {
+        return wallpaperDirty;
+    }
+
     boolean consumeWallpaperDirty() {
         boolean was = wallpaperDirty;
         wallpaperDirty = false;

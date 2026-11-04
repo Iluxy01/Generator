@@ -238,6 +238,10 @@ public final class CanvasService extends Service implements Repo.Listener {
             requestWallpaper(1000);
             return;
         }
+        boolean inUse = getSystemService(android.os.PowerManager.class).isInteractive()
+                && !getSystemService(KeyguardManager.class).isKeyguardLocked();
+        // Телефоном пользуются, и подложку никто не менял: запишем, когда экран погаснет.
+        if (inUse && !app.isWallpaperDirty()) return;
         boolean dirty = app.consumeWallpaperDirty();
         if (revision == writtenRevision && !dirty) return;
         writeRunning = true;

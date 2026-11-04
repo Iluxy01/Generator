@@ -51,8 +51,7 @@ def main():
             break
     check("штрих друга виден", seen > 300, f"{seen} точек")
 
-    bar_y = int(H - 62 * dp)
-    lock_x = W - int(89 * dp)
+    lock_x, bar_y = e2e.lock_button_xy()
     tap_xy(lock_x, bar_y)
     time.sleep(2)
     e2e.tap_text("Got it", timeout=2, scroll=False)
@@ -60,8 +59,15 @@ def main():
     time.sleep(1.5)
     check("блокировка: «назад» не закрывает холст", on_layer(), top_activity())
     shot("smoke_lock_mode")
+    lock_x, bar_y = e2e.lock_button_xy()
     sh("shell", "input", "swipe", str(lock_x), str(bar_y), str(lock_x), str(bar_y), "1000")
     time.sleep(1.5)
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(2)
+    check("после снятия блокировки «назад» работает", not on_layer(), top_activity())
+    sleep_phone()
+    wake_phone()
+    lock_x, bar_y = e2e.lock_button_xy()
 
     tap_xy(W // 2, bar_y)
     time.sleep(2.5)

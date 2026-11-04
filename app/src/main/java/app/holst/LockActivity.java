@@ -56,6 +56,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
     private ImageView lockButton;
     private boolean lockMode;
     private boolean sawLocked;
+    private boolean unlockRequested;
 
     private final Runnable chromeBack = () -> setChromeVisible(true);
     private final Runnable friendDone = () -> {
@@ -184,7 +185,8 @@ public final class LockActivity extends Activity implements Repo.Listener {
         }
         // Панель инструментов не должна попадать под кнопки навигации.
         findViewById(R.id.root).setOnApplyWindowInsetsListener((v, insets) -> {
-            int nav = insets.getSystemWindowInsetBottom();
+            // Постоянный отступ: при скрытии панелей инструменты не должны прыгать под пальцем.
+            int nav = insets.getStableInsetBottom();
             int bottom = Math.max(dp(20), nav + dp(2));
             FrameLayout.LayoutParams barLp = (FrameLayout.LayoutParams) bar.getLayoutParams();
             barLp.bottomMargin = bottom;
@@ -353,7 +355,13 @@ public final class LockActivity extends Activity implements Repo.Listener {
             overridePendingTransition(0, 0);
             return;
         }
+        unlockRequested = true;
         km.requestDismissKeyguard(this, new KeyguardManager.KeyguardDismissCallback() {
+            @Override
+            public void onDismissCancelled() {
+                unlockRequested = false;
+            }
+
             @Override
             public void onDismissSucceeded() {
                 finish();
@@ -373,6 +381,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
     protected void onStart() {
         super.onStart();
         visible = true;
+        unlockRequested = false;
         app.repo.addListener(this);
         app.sync.addStatusListener(statusListener);
         app.sync.start();
@@ -394,7 +403,8 @@ public final class LockActivity extends Activity implements Repo.Listener {
         app.repo.removeListener(this);
         app.sync.removeStatusListener(statusListener);
         app.sync.updatePace();
-        CanvasService.onLayerHidden();
+        // Человек вводит пароль и сейчас окажется на рабочем столе: обои подождут до выключения экрана.
+        if (!unlockRequested) CanvasService.onLayerHidden();
     }
 
     @Override
