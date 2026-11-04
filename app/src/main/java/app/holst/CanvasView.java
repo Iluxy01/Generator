@@ -30,7 +30,9 @@ public final class CanvasView extends View implements Repo.Listener {
     private static final long LIVE_SEND_MS = 300;
     private static final int MIN_STEP = 10;
     private static final int MAX_PAIRS = 1200;
-    private static final int MAX_PLAYING = 4;
+    private static final long BAKE_IDLE_MS = 700;
+    private static final int BAKE_AT_ONCE = 12;
+    private static final int BAKE_MAX = 40;
     private static final long PLAYBACK_STALE_MS = 12_000;
     private static final long RENDER_GAP_MS = 100;
     private static final long FRESH_SEC = 20;
@@ -44,12 +46,34 @@ public final class CanvasView extends View implements Repo.Listener {
     private Canvas layerCanvas;
     private int width;
     private int height;
+    /** Размер картинки рисунка: на слабых телефонах меньше экрана. */
+    private int layerW;
+    private int layerH;
+    private final Rect screenRect = new Rect();
+    private final Paint bitmapPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Device device;
     private DrawingListener drawingListener;
     private int renderedRevision = -1;
     private boolean rendering;
     private boolean renderDirty;
     private boolean shown = true;
-    private final List<Stroke> appendedWhileRendering = new ArrayList<>();
+
+    /**
+     * Законченные штрихи, ещё не впечатанные в картинку. Каждая запись в большую картинку заново
+     * отправляет её в видеокарту, и на слабых телефонах это заметный рывок. Поэтому штрихи
+     * копятся и рисуются как контуры, а в картинку ложатся разом, когда рука остановилась.
+     */
+    private static final class Baking {
+        final Stroke stroke;
+        final Path path;
+
+        Baking(Stroke stroke, Path path) {
+            this.stroke = stroke;
+            this.path = path;
+        }
+    }
+
+    private final List<Baking> pending = new ArrayList<>();
     private int seenClearEpoch;
 
     /** Штрихи друга, которые ещё проигрываются. */
@@ -85,9 +109,11 @@ public final class CanvasView extends View implements Repo.Listener {
         }
     };
     private final Runnable renderLater = this::renderIfNeeded;
+    private final Runnable bakeLater = this::bakeNow;
 
     public CanvasView(Context c, AttributeSet a) {
         super(c, a);
+        device = Device.get(c);
     }
 
     void setDrawingListener(DrawingListener l) {
@@ -138,12 +164,18 @@ public final class CanvasView extends View implements Repo.Listener {
         if (w <= 0 || h <= 0) return;
         width = w;
         height = h;
+        screenRect.set(0, 0, w, h);
+        float scale = Math.min(1f, (float) device.maxWidth / w);
+        layerW = Math.round(w * scale);
+        layerH = Math.round(h * scale);
         spare = null;
-        layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        layer = Bitmap.createBitmap(layerW, layerH, Bitmap.Config.ARGB_8888);
         layerCanvas = new Canvas(layer);
         final Context context = getContext();
+        final int lw = layerW;
+        final int lh = layerH;
         app.render.execute(() -> {
-            final Bitmap loaded = Bg.load(context, w, h);
+            final Bitmap loaded = Bg.load(context, lw, lh);
             post(() -> {
                 if (w == width && h == height) {
                     bg = loaded;
@@ -179,8 +211,8 @@ public final class CanvasView extends View implements Repo.Listener {
         if (rendering || !renderDirty || layer == null) return;
         rendering = true;
         renderDirty = false;
-        final int w = width;
-        final int h = height;
+        final int w = layerW;
+        final int h = layerH;
         final int revision = app.repo.revision();
         final List<Stroke> list = app.repo.strokes();
         final Set<String> skip = new HashSet<>();
@@ -189,6 +221,7 @@ public final class CanvasView extends View implements Repo.Listener {
             if (p.isFinished() && app.repo.contains(p.id)) included.add(p.id);
             else skip.add(p.id);
         }
+        final List<Baking> pendingAtStart = new ArrayList<>(pending);
         final Bitmap target = spare;
         spare = null;
         app.render.execute(() -> {
@@ -201,26 +234,25 @@ public final class CanvasView extends View implements Repo.Listener {
                 if (!skip.contains(s.id)) Renderer.draw(c, s, w, h, p);
             }
             final Bitmap done = out;
-            post(() -> onRendered(done, revision, included, w, h));
+            post(() -> onRendered(done, revision, included, pendingAtStart, w, h));
         });
     }
 
-    private void onRendered(Bitmap out, int revision, List<String> included, int w, int h) {
+    private void onRendered(Bitmap out, int revision, List<String> included, List<Baking> covered, int w, int h) {
         rendering = false;
-        if (w != width || h != height) {
+        if (w != layerW || h != layerH) {
             renderIfNeeded();
             return;
         }
         spare = layer;
         layer = out;
         layerCanvas = new Canvas(layer);
-        for (Stroke s : appendedWhileRendering) Renderer.draw(layerCanvas, s, w, h, paint);
-        appendedWhileRendering.clear();
+        pending.removeAll(covered);
         for (String id : included) {
             playing.remove(id);
             playingStrokes.remove(id);
         }
-        // Всё, что появилось во время сборки, уже дорисовано поверх или запросило новую сборку.
+        // Всё, что появилось во время сборки, лежит в очереди или запросило новую сборку.
         renderedRevision = renderDirty ? revision : app.repo.revision();
         invalidate();
         if (renderDirty) postDelayed(renderLater, RENDER_GAP_MS);
@@ -230,7 +262,7 @@ public final class CanvasView extends View implements Repo.Listener {
 
     @Override
     protected void onDraw(Canvas c) {
-        if (bg != null) c.drawBitmap(bg, 0, 0, null);
+        if (bg != null) c.drawBitmap(bg, null, screenRect, bitmapPaint);
         else c.drawColor(Bg.SHEET);
         if (layer == null) return;
 
@@ -239,9 +271,18 @@ public final class CanvasView extends View implements Repo.Listener {
 
         boolean anyErase = drawing && eraser;
         for (Playback p : playing.values()) anyErase |= p.erase;
+        for (Baking b : pending) anyErase |= b.stroke.erase;
         // Отдельный слой нужен только ластику: он стирает рисунок, но не подложку.
         int save = anyErase ? c.saveLayer(null, null) : -1;
-        c.drawBitmap(layer, 0, 0, null);
+        c.drawBitmap(layer, null, screenRect, bitmapPaint);
+        for (Baking b : pending) {
+            if (b.path != null) {
+                Renderer.setup(paint, b.stroke.color, b.stroke.width, b.stroke.erase, width);
+                c.drawPath(b.path, paint);
+            } else {
+                Renderer.draw(c, b.stroke, width, height, paint);
+            }
+        }
         for (Playback p : playing.values()) {
             if (p.hasPoints()) Renderer.drawPartial(c, tmpPath, p, width, height, paint);
         }
@@ -277,14 +318,32 @@ public final class CanvasView extends View implements Repo.Listener {
     private void commitPlayback(Playback p) {
         Stroke s = playingStrokes.get(p.id);
         if (s != null && !rendering && !renderDirty && app.repo.isLast(s)) {
-            Renderer.draw(layerCanvas, s, width, height, paint);
+            addPending(s);
             playing.remove(p.id);
             playingStrokes.remove(p.id);
-            renderedRevision = app.repo.revision();
         } else {
             // Штрих уже виден целиком; лист перестроится с ним в нужном порядке.
             requestRender();
         }
+    }
+
+    private void addPending(Stroke s) {
+        pending.add(new Baking(s, Renderer.buildPath(s.pts, width, height)));
+        if (!rendering && !renderDirty) renderedRevision = app.repo.revision();
+        removeCallbacks(bakeLater);
+        postDelayed(bakeLater, pending.size() >= BAKE_AT_ONCE && !drawing ? 0 : BAKE_IDLE_MS);
+        invalidate();
+    }
+
+    private void bakeNow() {
+        if (pending.isEmpty() || layerCanvas == null) return;
+        if (rendering || (drawing && pending.size() < BAKE_MAX)) {
+            postDelayed(bakeLater, BAKE_IDLE_MS);
+            return;
+        }
+        for (Baking b : pending) Renderer.draw(layerCanvas, b.stroke, layerW, layerH, paint);
+        pending.clear();
+        invalidate();
     }
 
     private void drawCurrent(Canvas c) {
@@ -304,7 +363,7 @@ public final class CanvasView extends View implements Repo.Listener {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 // Точки приходят сразу, а не раз в кадр: линия успевает за пальцем.
-                requestUnbufferedDispatch(e);
+                if (device.unbufferedTouch) requestUnbufferedDispatch(e);
                 startStroke(e.getEventTime());
                 addPoint(e.getX(), e.getY(), e.getEventTime());
                 postDelayed(liveSender, LIVE_SEND_MS);
@@ -416,7 +475,7 @@ public final class CanvasView extends View implements Repo.Listener {
         if (!shown || layer == null) return;
         Playback p = playing.get(c.id);
         if (p == null) {
-            if (playing.size() >= MAX_PLAYING) return;
+            if (playing.size() >= device.maxPlaying) return;
             p = new Playback(c.id, c.color, c.width, c.erase);
             playing.put(c.id, p);
         }
@@ -436,7 +495,7 @@ public final class CanvasView extends View implements Repo.Listener {
             postInvalidateOnAnimation();
             return;
         }
-        boolean fresh = !s.mine && shown && playing.size() < MAX_PLAYING
+        boolean fresh = !s.mine && shown && playing.size() < device.maxPlaying
                 && Math.abs(System.currentTimeMillis() / 1000 - s.sec) <= FRESH_SEC;
         if (fresh) {
             p = new Playback(s.id, s.color, s.width, s.erase);
@@ -450,10 +509,7 @@ public final class CanvasView extends View implements Repo.Listener {
             requestRender();
             return;
         }
-        Renderer.draw(layerCanvas, s, width, height, paint);
-        if (rendering) appendedWhileRendering.add(s);
-        else renderedRevision = app.repo.revision();
-        invalidate();
+        addPending(s);
     }
 
     @Override
@@ -462,7 +518,9 @@ public final class CanvasView extends View implements Repo.Listener {
             seenClearEpoch = app.repo.clearEpoch();
             playing.clear();
             playingStrokes.clear();
+            pending.clear();
         } else {
+            pending.removeIf(b -> !app.repo.contains(b.stroke.id));
             for (String id : new ArrayList<>(playingStrokes.keySet())) {
                 if (!app.repo.contains(id)) {
                     playing.remove(id);
@@ -470,7 +528,6 @@ public final class CanvasView extends View implements Repo.Listener {
                 }
             }
         }
-        appendedWhileRendering.clear();
         requestRender();
     }
 }

@@ -29,7 +29,7 @@ public final class CanvasService extends Service implements Repo.Listener {
     private static final int ID_SERVICE = 1;
     private static final int ID_FRIEND = 2;
     private static final int ID_LAYER = 3;
-    private static final long WALLPAPER_SCREEN_ON_MS = 5000;
+    private static final long WALLPAPER_LOCK_VISIBLE_MS = 5000;
     private static final long WALLPAPER_SCREEN_OFF_MS = 15_000;
     private static final long FRIEND_NOTIFY_EVERY_MS = 60_000;
 
@@ -208,7 +208,9 @@ public final class CanvasService extends Service implements Repo.Listener {
     /** Слой скрылся: теперь виден настоящий экран блокировки, обои должны быть свежими. */
     static void onLayerHidden() {
         CanvasService s = running;
-        if (s != null) s.requestWallpaper(200);
+        // Если телефон уже разблокирован, обои подождут: запись в момент открытия рабочего стола
+        // заметно тормозит анимацию на всём телефоне.
+        if (s != null && s.getSystemService(KeyguardManager.class).isKeyguardLocked()) s.requestWallpaper(200);
     }
 
     private void requestWallpaper(long delay) {
@@ -218,13 +220,15 @@ public final class CanvasService extends Service implements Repo.Listener {
     }
 
     /**
-     * Запись обоев — тяжёлая операция для всей системы, поэтому при рисовании обои не пишутся на
-     * каждый штрих. Пока виден холст, они и не нужны: запишутся, как только он скроется.
+     * Запись обоев — тяжёлая операция для всей системы: Android заново считает цвета темы, и рабочий
+     * стол начинает тормозить. Поэтому пока человек пользуется телефоном, обои не трогаем вообще:
+     * экран блокировки он всё равно не видит. Запишем, когда экран погаснет.
      */
     private void requestWallpaperAfterChange() {
         if (LockActivity.isVisible()) return;
+        if (!getSystemService(KeyguardManager.class).isKeyguardLocked()) return;
         boolean screenOn = getSystemService(android.os.PowerManager.class).isInteractive();
-        requestWallpaper(screenOn ? WALLPAPER_SCREEN_ON_MS : WALLPAPER_SCREEN_OFF_MS);
+        requestWallpaper(screenOn ? WALLPAPER_LOCK_VISIBLE_MS : WALLPAPER_SCREEN_OFF_MS);
     }
 
     private void writeWallpaperNow() {

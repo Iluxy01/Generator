@@ -249,7 +249,7 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
         nextDigestAt = 0;
         if (pool == null) return;
         if (open > 0) sendDigest();
-        long interval = LockActivity.isVisible() ? 10_000 : screenOn() ? 30_000 : 180_000;
+        long interval = LockActivity.isVisible() ? 10_000 : screenOn() ? 60_000 : 180_000;
         scheduleDigest(interval);
     }
 

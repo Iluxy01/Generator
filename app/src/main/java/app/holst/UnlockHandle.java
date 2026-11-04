@@ -15,6 +15,8 @@ public final class UnlockHandle extends View {
     private final Paint pill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final String hint;
+    private final String lockedHint;
+    private boolean locked;
     private float downY;
     private float drag;
     private boolean moved;
@@ -24,6 +26,7 @@ public final class UnlockHandle extends View {
     public UnlockHandle(Context c, AttributeSet a) {
         super(c, a);
         hint = c.getString(R.string.unlock_hint);
+        lockedHint = c.getString(R.string.lock_handle_hint);
         pill.setColor(0xF2FFFFFF);
         pill.setShadowLayer(6 * density, 0, density, 0x99000000);
         text.setColor(0xF2FFFFFF);
@@ -35,12 +38,24 @@ public final class UnlockHandle extends View {
         setLayerType(LAYER_TYPE_SOFTWARE, null);
     }
 
+    /** В режиме блокировки полоска ни на что не реагирует и только подсказывает, как выйти. */
+    void setLocked(boolean v) {
+        locked = v;
+        drag = 0;
+        invalidate();
+    }
+
     void setOnUnlock(Runnable r) {
         onUnlock = r;
     }
 
     @Override
     protected void onDraw(Canvas c) {
+        if (locked) {
+            text.setAlpha(170);
+            c.drawText(lockedHint, getWidth() / 2f, getHeight() * 0.42f + 22 * density, text);
+            return;
+        }
         float cx = getWidth() / 2f;
         float half = 22 * density;
         float y = getHeight() * 0.42f - drag;
@@ -52,6 +67,7 @@ public final class UnlockHandle extends View {
 
     @Override
     public boolean onTouchEvent(MotionEvent e) {
+        if (locked) return true;
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downY = e.getRawY();
@@ -88,7 +104,7 @@ public final class UnlockHandle extends View {
     }
 
     private void fire() {
-        if (onUnlock != null) onUnlock.run();
+        if (!locked && onUnlock != null) onUnlock.run();
     }
 
     private void settle() {

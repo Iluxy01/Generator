@@ -8,11 +8,14 @@ import android.os.Bundle;
 import android.view.Display;
 import android.view.View;
 import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +33,8 @@ public final class LockActivity extends Activity implements Repo.Listener {
     private static final long CHROME_BACK_MS = 500;
     private static final long CONFIRM_MS = 3000;
     private static final long FRIEND_CHIP_MS = 4000;
+    private static final long KEYGUARD_WATCH_MS = 350;
+    private static final long LOCKED_SCREEN_ON_MS = 120_000;
 
     private static LockActivity alive;
     private static boolean visible;
@@ -47,6 +52,10 @@ public final class LockActivity extends Activity implements Repo.Listener {
     private ColorDot eraserDot;
     private boolean confirmClear;
     private boolean friendDrawing;
+    private UnlockHandle handle;
+    private ImageView lockButton;
+    private boolean lockMode;
+    private boolean sawLocked;
 
     private final Runnable chromeBack = () -> setChromeVisible(true);
     private final Runnable friendDone = () -> {
@@ -54,6 +63,22 @@ public final class LockActivity extends Activity implements Repo.Listener {
         updateChip();
     };
     private final Runnable statusListener = this::updateChip;
+    private final Runnable releaseScreen = () ->
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    /** Разблокировка отпечатком или лицом: уходим сразу, не дожидаясь системного сообщения. */
+    private final Runnable keyguardWatch = new Runnable() {
+        @Override
+        public void run() {
+            boolean locked = getSystemService(KeyguardManager.class).isKeyguardLocked();
+            if (locked) {
+                sawLocked = true;
+            } else if (sawLocked) {
+                dismiss();
+                return;
+            }
+            canvas.postDelayed(this, KEYGUARD_WATCH_MS);
+        }
+    };
     private final Runnable clearReset = () -> {
         confirmClear = false;
         clearButton.setText(R.string.clear_all);
@@ -89,7 +114,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             w.setAttributes(lp);
         }
-        useHighestRefreshRate(w);
+        if (Device.get(this).highRefresh) useHighestRefreshRate(w);
         setContentView(R.layout.activity_lock);
 
         canvas = findViewById(R.id.canvas);
@@ -100,7 +125,17 @@ public final class LockActivity extends Activity implements Repo.Listener {
         currentDot = findViewById(R.id.current_dot);
         clearButton = findViewById(R.id.clear_all);
 
-        UnlockHandle handle = findViewById(R.id.handle);
+        handle = findViewById(R.id.handle);
+        lockButton = findViewById(R.id.lock_mode);
+        lockButton.setOnClickListener(v -> {
+            if (lockMode) Toast.makeText(this, R.string.lock_hold_hint, Toast.LENGTH_SHORT).show();
+            else setLockMode(true, true);
+        });
+        lockButton.setOnLongClickListener(v -> {
+            if (!lockMode) return false;
+            setLockMode(false, true);
+            return true;
+        });
         handle.setOnUnlock(this::unlock);
         canvas.setDrawingListener(this::onDrawing);
         currentDot.setOnClickListener(v -> togglePanel());
@@ -159,6 +194,51 @@ public final class LockActivity extends Activity implements Repo.Listener {
             panel.setLayoutParams(panelLp);
             return insets;
         });
+    }
+
+    /**
+     * Режим блокировки: случайный жест не закроет холст и не вызовет ввод пароля. Полоска и кнопка
+     * «назад» не работают, системные панели спрятаны, и первое движение от края только показывает
+     * их, а не выполняет действие. Совсем запретить жесты системы приложению нельзя.
+     */
+    private void setLockMode(boolean on, boolean announce) {
+        if (lockMode == on) return;
+        lockMode = on;
+        handle.setLocked(on);
+        lockButton.setImageResource(on ? R.drawable.ic_lock_closed : R.drawable.ic_lock_open);
+        setSystemBarsHidden(on);
+        canvas.removeCallbacks(releaseScreen);
+        if (on) keepScreenForAWhile();
+        else releaseScreen.run();
+        if (announce) Toast.makeText(this, on ? R.string.lock_on_hint : R.string.lock_off_hint, Toast.LENGTH_SHORT).show();
+    }
+
+    /** Пока человек рисует в этом режиме, экран не гаснет; если забыл о телефоне — погаснет. */
+    private void keepScreenForAWhile() {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        canvas.removeCallbacks(releaseScreen);
+        canvas.postDelayed(releaseScreen, LOCKED_SCREEN_ON_MS);
+    }
+
+    private void setSystemBarsHidden(boolean hidden) {
+        Window w = getWindow();
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController c = w.getInsetsController();
+            if (c == null) return;
+            if (hidden) {
+                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+            } else {
+                c.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+            }
+        } else {
+            int base = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
+            w.getDecorView().setSystemUiVisibility(hidden
+                    ? base | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    : base);
+        }
     }
 
     private void buildPanel() {
@@ -249,6 +329,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
 
     private void onDrawing(boolean drawing) {
         canvas.removeCallbacks(chromeBack);
+        if (lockMode) keepScreenForAWhile();
         if (drawing) {
             setPanelOpen(false);
             setChromeVisible(false);
@@ -265,6 +346,7 @@ public final class LockActivity extends Activity implements Repo.Listener {
     }
 
     private void unlock() {
+        if (lockMode) return;
         KeyguardManager km = getSystemService(KeyguardManager.class);
         if (!km.isKeyguardLocked()) {
             finish();
@@ -297,12 +379,18 @@ public final class LockActivity extends Activity implements Repo.Listener {
         app.sync.catchUp();
         canvas.refreshIfStale();
         updateChip();
+        canvas.removeCallbacks(keyguardWatch);
+        canvas.post(keyguardWatch);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         visible = false;
+        canvas.removeCallbacks(keyguardWatch);
+        // Экран погас или телефон разблокирован: режим своё отработал.
+        setLockMode(false, false);
+        app.repo.saveAsync();
         app.repo.removeListener(this);
         app.sync.removeStatusListener(statusListener);
         app.sync.updatePace();
@@ -317,6 +405,10 @@ public final class LockActivity extends Activity implements Repo.Listener {
 
     @Override
     public void onBackPressed() {
+        if (lockMode) {
+            Toast.makeText(this, R.string.lock_hold_hint, Toast.LENGTH_SHORT).show();
+            return;
+        }
         finish();
         overridePendingTransition(0, 0);
     }

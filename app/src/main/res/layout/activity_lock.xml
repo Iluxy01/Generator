@@ -112,6 +112,17 @@
             android:layout_weight="1" />
 
         <ImageView
+            android:id="@+id/lock_mode"
+            android:layout_width="46dp"
+            android:layout_height="52dp"
+            android:clickable="true"
+            android:contentDescription="@string/lock_button"
+            android:focusable="true"
+            android:paddingHorizontal="11dp"
+            android:paddingVertical="14dp"
+            android:src="@drawable/ic_lock_open" />
+
+        <ImageView
             android:id="@+id/undo"
             android:layout_width="52dp"
             android:layout_height="52dp"

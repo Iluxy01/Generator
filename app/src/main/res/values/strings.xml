@@ -17,8 +17,27 @@
     <string name="peer_seen">Друг был в сети %1$d мин назад</string>
     <string name="peer_none">Друга пока не видно: проверь, что код у вас один и тот же</string>
     <string name="no_connection">Нет связи: рисунок отправится позже</string>
-    <string name="share">Отправить другу</string>
-    <string name="join">Ввести код друга</string>
+    <string name="share">Отправить код</string>
+    <string name="join">Ввести код</string>
+    <string name="code_copied">Код скопирован</string>
+    <string name="preview_description">Вид холста. Нажми, чтобы сменить обои или выключить холст</string>
+    <string name="menu_picture">Сменить картинку</string>
+    <string name="menu_settings">Разрешения</string>
+    <string name="menu_off">Выключить холст</string>
+    <string name="menu_on">Включить холст</string>
+    <string name="onboarding_tagline">Твой экран блокировки — общий лист с другом. Настрой один раз, дальше всё работает само.</string>
+    <string name="onboarding_bg_title">1. Что положить под рисунки</string>
+    <string name="onboarding_bg_hint">Эта картинка станет обоями экрана блокировки</string>
+    <string name="onboarding_bg_picture">Выбрана картинка. Можно поменять</string>
+    <string name="onboarding_bg_blank">Выбран чистый лист. Можно поменять</string>
+    <string name="onboarding_perm_title">2. Разреши всё по очереди</string>
+    <string name="onboarding_start">Начать</string>
+    <string name="onboarding_start_partial">Начать без разрешений</string>
+    <string name="lock_on_hint">Холст заблокирован. Чтобы выйти, удерживай замок</string>
+    <string name="lock_off_hint">Блокировка снята</string>
+    <string name="lock_hold_hint">Удерживай замок, чтобы выйти</string>
+    <string name="lock_handle_hint">Удерживай замок</string>
+    <string name="lock_button">Заблокировать холст от случайных жестов</string>
     <string name="share_text">Давай рисовать друг у друга на экране блокировки! Поставь Холст: %1$s\nИ введи мой код: %2$s</string>
 
     <string name="join_title">Код друга</string>
@@ -34,7 +53,7 @@
     <string name="perm_notifications">Сообщать, когда друг нарисовал</string>
     <string name="perm_battery">Оставаться на связи в фоне</string>
     <string name="perm_allow">Разрешить</string>
-    <string name="perm_ready">Готово</string>
+    <string name="perm_ready">Разрешено</string>
     <string name="perm_gray_hint">Настройка серая и не нажимается? Открой Настройки → Приложения → Холст → ⋮ → «Разрешить ограниченные настройки».</string>
     <string name="perm_xiaomi_hint">На Xiaomi ещё включи в настройках приложения «Экран блокировки» и «Автозапуск».</string>
 
@@ -48,7 +67,7 @@
     <string name="how_to">Заблокируй телефон и снова включи экран: рисуй пальцем прямо на обоях. Чтобы разблокировать, потяни полоску внизу вверх.</string>
     <string name="canvas_off">Холст выключен. На экране блокировки теперь обои рабочего стола.</string>
 
-    <string name="unlock_hint">Потяни вверх, чтобы открыть</string>
+    <string name="unlock_hint">Потяни вверх</string>
     <string name="friend_drawing">Друг рисует…</string>
     <string name="clear_all">Стереть всё</string>
     <string name="clear_confirm">Точно стереть у обоих?</string>

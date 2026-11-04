@@ -50,6 +50,14 @@ final class Prefs {
         sp.edit().putBoolean("chosen", v).apply();
     }
 
+    boolean onboarded() {
+        return sp.getBoolean("onboarded", false);
+    }
+
+    void setOnboarded(boolean v) {
+        sp.edit().putBoolean("onboarded", v).apply();
+    }
+
     int colorIndex() {
         return sp.getInt("color", 0);
     }

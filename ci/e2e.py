@@ -238,6 +238,31 @@ def tap_xy(x, y):
     sh("shell", "input", "tap", str(x), str(y))
 
 
+def screen_size():
+    size = re.findall(r"(\d+)x(\d+)", sh("shell", "wm", "size"))[-1]
+    return int(size[0]), int(size[1])
+
+
+def dp_px():
+    m = re.findall(r"(\d+)", sh("shell", "wm", "density"))
+    return int(m[-1]) / 160
+
+
+def open_picker():
+    """Открывает выбор картинки: в новой версии через нажатие на вид холста."""
+    if tap_text("Выбрать картинку", timeout=3, scroll=False):
+        return True
+    for node in ui_nodes():
+        if "Вид холста" in (node.get("content-desc") or ""):
+            tap_xy(*center(node))
+            break
+    else:
+        W, H = screen_size()
+        tap_xy(W // 2, int(H * .35))
+    time.sleep(1.5)
+    return tap_text("Сменить картинку", timeout=8, scroll=False)
+
+
 def dismiss_system_dialogs():
     """Медленный эмулятор иногда показывает «X isn't responding» поверх всего. Приложение тут ни при чём."""
     for node in ui_nodes():
@@ -264,7 +289,8 @@ def tap_text(text, timeout=20, scroll=True):
             tap_xy(x, y)
             return True
         if scroll:
-            sh("shell", "input", "swipe", "540", "1700", "540", "1100", "300")
+            W, H = screen_size()
+            sh("shell", "input", "swipe", str(W // 2), str(int(H * .7)), str(W // 2), str(int(H * .45)), "300")
         time.sleep(1)
     return False
 
@@ -281,11 +307,16 @@ def join_room(code):
     for attempt in range(3):
         sh("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
         time.sleep(4)
-        sh("shell", "input", "swipe", "540", "500", "540", "1900", "300")
-        time.sleep(1)
-        tap_text("Чистый лист")
-        time.sleep(3)
-        tap_text("Ввести код друга")
+        if find_text("Ввести код") is None:
+            tap_text("Чистый лист", timeout=12)
+            time.sleep(3)
+            shot("02_onboarding")
+            for label in ("Начать", "Начать без разрешений"):
+                if tap_text(label, timeout=5):
+                    break
+            time.sleep(3)
+        if not tap_text("Ввести код", timeout=6):
+            tap_text("Ввести код друга", timeout=6)
         time.sleep(1.5)
         sh("shell", "input", "text", code)
         time.sleep(1)
@@ -352,14 +383,25 @@ def main():
 
     check("вошёл по коду друга, служба работает", join_room(code))
 
-    connected = None
-    for _ in range(30):
-        connected = find_text("На связи", contains=True)
-        if connected is not None:
-            break
-        time.sleep(1.5)
-    check("приложение на связи с ретрансляторами", connected is not None, connected.get("text") if connected is not None else "")
-    time.sleep(10)
+    time.sleep(12)
+    opened = len(re.findall(r"relay open", sh("logcat", "-d", "-v", "time", "Holst:D", "*:S", timeout=60)))
+    check("приложение на связи с ретрансляторами", opened > 0, f"{opened} подключений")
+
+    # ---- «Отправить код» копирует только код ----
+    check("есть кнопка «Отправить код»", tap_text("Отправить код", timeout=6, scroll=False))
+    time.sleep(1.5)
+    check("после копирования остаёмся в приложении", "MainActivity" in top_activity(), top_activity())
+    tap_text("Ввести код", timeout=6, scroll=False)
+    time.sleep(1.5)
+    sh("shell", "input", "keyevent", "279")  # вставить из буфера обмена
+    time.sleep(1)
+    pasted = [n.get("text") for n in ui_nodes() if n.get("class") == "android.widget.EditText"]
+    check("в буфере ровно код, больше ничего", pasted == [code], str(pasted))
+    tap_text("Отмена", timeout=5, scroll=False)
+    time.sleep(1)
+    shot("04a_main_screen")
+    texts = [n.get("text") for n in ui_nodes() if n.get("text")]
+    check("на главном экране только код и две кнопки", len(texts) == 3, str(texts))
     print("friend relays:", list(friend.conns), flush=True)
     shot("04_main_connected")
 
@@ -423,6 +465,36 @@ def main():
     sleep_phone()
     wake_phone()
     check("после повторного включения снова холст", on_layer(), top_activity())
+
+    # ---- Кнопка блокировки: случайные жесты не закрывают холст и не вызывают ввод пароля ----
+    lock_x, lock_y = W - int(89 * W / 411), int(H - 62 * W / 411)
+    tap_xy(lock_x, lock_y)
+    time.sleep(2)
+    tap_text("Got it", timeout=3, scroll=False)
+    time.sleep(1)
+    shot("09a_lock_mode")
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(1.5)
+    check("в блокировке «назад» не закрывает холст", on_layer(), top_activity())
+    sh("shell", "input", "swipe", str(W // 2), str(lock_y), str(W // 2), str(lock_y - 400), "200")
+    time.sleep(2)
+    check("в блокировке полоска не вызывает ввод пароля", find_text("PIN", contains=True) is None and on_layer(), top_activity())
+    tap_xy(W // 2, lock_y)
+    time.sleep(2)
+    check("в блокировке нажатие на полоску тоже ничего не делает", find_text("PIN", contains=True) is None and on_layer())
+    mark_lock = len(friend.got)
+    sh("shell", "input", "swipe", "4", str(H // 2), str(W // 2), str(H // 2 + 200), "400")
+    got_lock = friend.wait_for(lambda m: m.get("k") == "s" and m in friend.got[mark_lock:], 25)
+    check("в блокировке рисовать можно, даже начав от края", bool(got_lock), hard=False)
+    sh("shell", "input", "swipe", str(lock_x), str(lock_y), str(lock_x), str(lock_y), "1000")
+    time.sleep(1.5)
+    shot("09b_lock_off")
+    sh("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(2)
+    check("после снятия блокировки «назад» снова работает", not on_layer(), top_activity())
+    sleep_phone()
+    wake_phone()
+    check("снова холст после выхода из блокировки", on_layer(), top_activity())
 
     # ---- Палитра, отмена, стирание ----
     tap_xy(int(W * 0.08), int(H - 66 * W / 411))
@@ -510,9 +582,7 @@ def main():
     sh("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file:///sdcard/Pictures/holst_test.jpg")
     sh("shell", "am", "start", "-n", f"{PKG}/.MainActivity")
     time.sleep(3)
-    sh("shell", "input", "swipe", "540", "500", "540", "1900", "300")
-    time.sleep(1)
-    if tap_text("Выбрать картинку", timeout=10):
+    if open_picker():
         time.sleep(4)
         shot("18_picker")
         nodes = ui_nodes()

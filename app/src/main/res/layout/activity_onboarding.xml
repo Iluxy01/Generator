@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ink"
+    android:fillViewport="true"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="serif"
+            android:text="@string/app_name"
+            android:textColor="@color/paper"
+            android:textSize="42sp" />
+
+        <TextView
+            style="@style/Muted"
+            android:layout_marginTop="6dp"
+            android:text="@string/onboarding_tagline"
+            android:textSize="15sp" />
+
+        <LinearLayout style="@style/Card">
+
+            <TextView
+                style="@style/CardTitle"
+                android:text="@string/onboarding_bg_title" />
+
+            <TextView
+                android:id="@+id/bg_status"
+                style="@style/Muted"
+                android:layout_marginTop="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/pick"
+                    style="@style/BtnSecondary"
+                    android:layout_width="0dp"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/pick_picture" />
+
+                <Button
+                    android:id="@+id/blank"
+                    style="@style/BtnSecondary"
+                    android:layout_width="0dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/blank_sheet" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout style="@style/Card">
+
+            <TextView
+                style="@style/CardTitle"
+                android:text="@string/onboarding_perm_title" />
+
+            <LinearLayout style="@style/PermRow">
+
+                <TextView
+                    style="@style/PermLabel"
+                    android:text="@string/perm_overlay" />
+
+                <Button
+                    android:id="@+id/perm_overlay"
+                    style="@style/PermButton" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/row_notifications"
+                style="@style/PermRow">
+
+                <TextView
+                    style="@style/PermLabel"
+                    android:text="@string/perm_notifications" />
+
+                <Button
+                    android:id="@+id/perm_notifications"
+                    style="@style/PermButton" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/PermRow">
+
+                <TextView
+                    style="@style/PermLabel"
+                    android:text="@string/perm_battery" />
+
+                <Button
+                    android:id="@+id/perm_battery"
+                    style="@style/PermButton" />
+            </LinearLayout>
+
+            <TextView
+                style="@style/Muted"
+                android:layout_marginTop="14dp"
+                android:text="@string/perm_gray_hint"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/oem_hint"
+                style="@style/Muted"
+                android:layout_marginTop="6dp"
+                android:text="@string/perm_xiaomi_hint"
+                android:textSize="13sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/start"
+            style="@style/BtnPrimary"
+            android:layout_width="match_parent"
+            android:layout_marginTop="18dp"
+            android:text="@string/onboarding_start" />
+    </LinearLayout>
+</ScrollView>

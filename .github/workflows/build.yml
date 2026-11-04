@@ -123,9 +123,54 @@ jobs:
           git commit -qm "Результаты проверки ${{ github.run_number }}"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" e2e-results
 
+  smoke:
+    # Старые версии Android и экраны поменьше: холст, связь и разблокировка должны работать везде.
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 26, arch: x86, target: google_apis, profile: "Nexus 5" }
+          - { api: 29, arch: x86_64, target: google_apis, profile: "Nexus 4" }
+          - { api: 31, arch: x86_64, target: google_apis, profile: "pixel_3a" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: holst-apk
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install websocket-client cryptography pillow
+      - name: Включить KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Скачать образ эмулятора с повторами
+        run: |
+          for i in 1 2 3 4 5; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'system-images;android-${{ matrix.api }};${{ matrix.target }};${{ matrix.arch }}' > /tmp/sdk.log 2>&1
+            if ! grep -q 'error occurred' /tmp/sdk.log && [ -d "$ANDROID_HOME/system-images/android-${{ matrix.api }}/${{ matrix.target }}/${{ matrix.arch }}" ]; then echo ok; exit 0; fi
+            echo "попытка $i не удалась"; tail -2 /tmp/sdk.log; sleep 20
+          done
+          exit 1
+      - name: Проверка
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
+          profile: ${{ matrix.profile }}
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none
+          script: cd ci && python3 smoke.py ../Holst.apk
+
   release:
     # Новая версия попадает к людям, только если прошла обе проверки.
-    needs: [build, e2e, stress]
+    needs: [build, e2e, stress, smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

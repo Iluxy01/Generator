@@ -2,6 +2,7 @@ package app.holst;
 
 import android.app.WallpaperManager;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -11,6 +12,8 @@ import android.graphics.Rect;
 import android.hardware.display.DisplayManager;
 import android.media.ExifInterface;
 import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Display;
@@ -41,6 +44,24 @@ final class Bg {
         return new int[] {Math.min(dm.widthPixels, dm.heightPixels), Math.max(dm.widthPixels, dm.heightPixels)};
     }
 
+    /**
+     * Размер картинки для обоев с учётом мощности телефона. Пропорции экрана сохраняются, система
+     * сама растянет картинку, а памяти и работы нужно гораздо меньше.
+     */
+    static int[] targetSize(Context c) {
+        int[] s = screen(c);
+        int maxWidth = Device.get(c).maxWidth;
+        if (s[0] <= maxWidth) return s;
+        return new int[] {maxWidth, Math.round(s[1] * (float) maxWidth / s[0])};
+    }
+
+    /** Выбор картинки из галереи. */
+    static Intent pickIntent() {
+        return Build.VERSION.SDK_INT >= 33
+                ? new Intent(MediaStore.ACTION_PICK_IMAGES).setType("image/*")
+                : new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+    }
+
     static void useBlankSheet(Context c) {
         //noinspection ResultOfMethodCallIgnored
         file(c).delete();
@@ -69,7 +90,7 @@ final class Bg {
             } catch (IOException | RuntimeException e) {
                 Log.d(TAG, "no exif: " + e);
             }
-            int[] size = screen(c);
+            int[] size = targetSize(c);
             int sample = 1;
             int longSide = Math.max(bounds.outWidth, bounds.outHeight);
             while (longSide / (sample * 2) >= size[1]) sample *= 2;
@@ -159,7 +180,7 @@ final class Bg {
     /** Кладёт картинку в настоящие обои экрана блокировки. Обои рабочего стола не трогает. */
     static boolean writeLockWallpaper(Context c, List<Stroke> strokes) {
         try {
-            int[] size = screen(c);
+            int[] size = targetSize(c);
             Bitmap out = compose(c, strokes, size[0], size[1]);
             ByteArrayOutputStream bytes = new ByteArrayOutputStream(1 << 20);
             out.compress(Bitmap.CompressFormat.JPEG, 93, bytes);

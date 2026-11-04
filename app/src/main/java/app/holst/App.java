@@ -68,6 +68,14 @@ public final class App extends Application {
         return was;
     }
 
+    /** Подложка выбрана: экран блокировки становится холстом. */
+    void enableCanvas() {
+        prefs.setChosen(true);
+        prefs.setEnabled(true);
+        markWallpaperDirty();
+        CanvasService.start(this);
+    }
+
     /** Присоединиться к общему листу по коду друга. */
     void joinRoom(String code) {
         sync.stop();

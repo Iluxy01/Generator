@@ -31,6 +31,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <!-- Слой, который и есть «обои-холст»: живёт поверх экрана блокировки. -->
         <activity
             android:name=".LockActivity"

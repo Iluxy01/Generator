@@ -93,6 +93,26 @@ final class Renderer {
         c.drawPath(path, p);
     }
 
+    /** Готовый контур штриха, чтобы не собирать его заново в каждом кадре; null для одной точки. */
+    static Path buildPath(int[] pts, float w, float h) {
+        if (pts.length < 4) return null;
+        float k = w / Q;
+        float cy = h / 2f;
+        Path path = new Path();
+        float px = pts[0] * k;
+        float py = pts[1] * k + cy;
+        path.moveTo(px, py);
+        for (int i = 2; i + 1 < pts.length; i += 2) {
+            float x = pts[i] * k;
+            float y = pts[i + 1] * k + cy;
+            path.quadTo(px, py, (px + x) / 2f, (py + y) / 2f);
+            px = x;
+            py = y;
+        }
+        path.lineTo(px, py);
+        return path;
+    }
+
     static void draw(Canvas c, Stroke s, float w, float h, Paint p) {
         draw(c, s.pts, s.pts.length, s.color, s.width, s.erase, w, h, p);
     }

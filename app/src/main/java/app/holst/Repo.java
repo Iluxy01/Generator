@@ -453,7 +453,7 @@ final class Repo {
 
     private void scheduleSave() {
         main.removeCallbacks(saver);
-        main.postDelayed(saver, 1200);
+        main.postDelayed(saver, 3000);
     }
 
     void saveAsync() {

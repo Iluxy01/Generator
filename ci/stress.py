@@ -22,6 +22,8 @@ STRICT = {
     "catchup_worst_hang_ms": lambda v: v < 400,
     "friend_drawing_worst_hang_ms": lambda v: v < 400,
     "friend_drawing_anr": lambda v: v == 0,
+    "wallpaper_writes_on_home_screen": lambda v: v == 0,
+    "wallpaper_write_during_unlock": lambda v: v == 0,
 }
 
 
@@ -90,9 +92,7 @@ def pick_picture(c):
     sh("push", pic, "/sdcard/Pictures/holst_stress.jpg")
     sh("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file:///sdcard/Pictures/holst_stress.jpg")
     time.sleep(3)
-    sh("shell", "input", "swipe", "540", "500", "540", "1900", "300")
-    time.sleep(1)
-    if tap_text("Выбрать картинку", timeout=10):
+    if e2e.open_picker():
         time.sleep(4)
         thumbs = [n for n in ui_nodes() if "photo" in (n.get("content-desc") or "").lower() and "taken" in (n.get("content-desc") or "").lower()]
         if thumbs:
@@ -323,6 +323,52 @@ def friend_drawing(c):
     shot("s6_friend_drawing")
 
 
+def home_screen(c):
+    """Телефон разблокирован, человек листает рабочий стол, а друг в это время рисует."""
+    W, H, friend, bar_y = c.W, c.H, c.friend, c.bar_y
+    launcher = "com.google.android.apps.nexuslauncher"
+    # Перед разблокировкой на листе есть новый штрих: раньше обои писались прямо в момент открытия.
+    swipe(int(W * 0.2), int(H * 0.6), int(W * 0.8), int(H * 0.62))
+    time.sleep(2)
+    sh("logcat", "-c")
+    tap_xy(W // 2, bar_y)
+    time.sleep(2.5)
+    sh("shell", "input", "text", "1234")
+    sh("shell", "input", "keyevent", "KEYCODE_ENTER")
+    time.sleep(5)
+    print("  after unlock:", top_activity(), flush=True)
+    metric("wallpaper_write_during_unlock", full_log().count("lock wallpaper updated"))
+    sh("shell", "input", "keyevent", "KEYCODE_HOME")
+    time.sleep(3)
+    shot("s7_home")
+    sh("logcat", "-c")
+    sh("shell", "dumpsys", "gfxinfo", launcher, "reset")
+    base = int((time.time() + 600) * 1000)
+    stop_at = time.time() + 45
+    i = 0
+    while time.time() < stop_at:
+        sid = secrets.token_hex(8)
+        pts = []
+        px = py = 0
+        for j in range(30):
+            x, y = 1000 + j * 250, -3000 + (i % 30) * 200
+            pts += [x - px, y - py]
+            px, py = x, y
+        friend.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": base + i, "c": 0xFF32D74B, "w": 120, "e": 0, "p": pts, "u": 400})
+        i += 1
+        swipe(int(W * .85), H // 2, int(W * .15), H // 2, 250)
+        time.sleep(.4)
+        swipe(int(W * .15), H // 2, int(W * .85), H // 2, 250)
+        time.sleep(.4)
+    time.sleep(3)
+    log = full_log()
+    metric("wallpaper_writes_on_home_screen", log.count("lock wallpaper updated"))
+    out = sh("shell", "dumpsys", "gfxinfo", launcher)
+    keys = {"total": r"Total frames rendered: (\d+)", "janky": r"Janky frames: (\d+)", "p50": r"50th percentile: (\d+)ms",
+            "p90": r"90th percentile: (\d+)ms", "p99": r"99th percentile: (\d+)ms"}
+    metric("home_screen_frames", {k: (int(m.group(1)) if (m := re.search(v, out)) else -1) for k, v in keys.items()})
+
+
 def main():
     strict = "--strict" in sys.argv
     apk = [a for a in sys.argv[1:] if not a.startswith("--")][0]
@@ -359,7 +405,7 @@ def main():
     shot("s0_layer")
 
     for fn in (steady_drawing, long_stroke, clear_with_clock_skew, undo_with_clock_skew, friend_clear_old_clock,
-               silent_disconnect, anti_entropy, flood, friend_drawing):
+               silent_disconnect, anti_entropy, flood, friend_drawing, home_screen):
         print(f"--- {fn.__name__}", flush=True)
         section(fn, c)
 
