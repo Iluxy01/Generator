@@ -37,10 +37,13 @@ public class CryptoTest {
 
     @Test
     public void roomIsDeterministicAndEncrypts() {
-        Room a = Room.derive("482177301956");
-        Room b = Room.derive("482177301956");
-        Room other = Room.derive("111111111111");
-        assertEquals(a.pubHex, b.pubHex);
+        Room a = Room.derive("482177301956", Room.newDeviceSecret());
+        Room b = Room.derive("482177301956", Room.newDeviceSecret());
+        Room other = Room.derive("111111111111", Room.newDeviceSecret());
+        assertEquals("у всех с одним кодом одна метка", a.tag, b.tag);
+        assertEquals(a.legacyPubHex, b.legacyPubHex);
+        assertFalse("а ключи подписи разные", a.pubHex.equals(b.pubHex));
+        assertFalse(a.tag.equals(other.tag));
         String ct = a.encrypt("{\"k\":\"s\"}");
         assertEquals("{\"k\":\"s\"}", b.decrypt(ct));
         assertNull(other.decrypt(ct));
@@ -48,7 +51,7 @@ public class CryptoTest {
 
     @Test
     public void eventSignatureIsValid() {
-        Room r = Room.derive("482177301956");
+        Room r = Room.derive("482177301956", Room.newDeviceSecret());
         Room.Event e = r.event(30078, "abc", r.encrypt("x"), 1700000000L);
         String sig = e.json.substring(e.json.indexOf("\"sig\":\"") + 7, e.json.length() - 2);
         assertTrue(Crypto.verify(Crypto.unhex(r.pubHex), Crypto.unhex(e.id), Crypto.unhex(sig)));

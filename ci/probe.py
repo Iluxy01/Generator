@@ -36,7 +36,8 @@ def probe(host):
     except Exception as e:
         r["error"] = f"connect: {e}"
         return
-    rx.send(json.dumps(["REQ", "x", {"authors": [pub], "kinds": [20078, 30078], "since": int(time.time()) - 60}]))
+    tag = secrets.token_hex(16)
+    rx.send(json.dumps(["REQ", "x", {"#t": [tag], "kinds": [20078, 30078], "since": int(time.time()) - 60}]))
     stop = []
 
     def reader(ws, is_rx):
@@ -73,13 +74,13 @@ def probe(host):
     content = base64.b64encode(secrets.token_bytes(180)).decode()
     try:
         while time.time() - start < SECONDS:
-            ev = event(sk, pub, 20078, [], content)
+            ev = event(sk, pub, 20078, [["t", tag]], base64.b64encode(secrets.token_bytes(180)).decode())
             sent_at[ev["id"]] = time.time()
             tx.send(json.dumps(["EVENT", ev]))
             r["sent_live"] += 1
             if time.time() >= next_stored:
                 big = base64.b64encode(secrets.token_bytes(1200)).decode()
-                ev = event(sk, pub, 30078, [["d", secrets.token_hex(8)]], big)
+                ev = event(sk, pub, 30078, [["d", secrets.token_hex(8)], ["t", tag]], big)
                 sent_at[ev["id"]] = time.time()
                 tx.send(json.dumps(["EVENT", ev]))
                 r["sent_stored"] += 1

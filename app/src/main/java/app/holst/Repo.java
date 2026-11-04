@@ -255,7 +255,12 @@ final class Repo {
             case "s":
                 Stroke s = Stroke.parse(o, createdAt, false);
                 observeT(s.t);
-                if (s.t <= clearT || dead.contains(s.id) || byId.containsKey(s.id)) return;
+                if (s.t <= clearT || dead.contains(s.id)) return;
+                if (byId.containsKey(s.id)) {
+                    // Кто-то уже дослал этот штрих: повторять незачем.
+                    cancelUnsentResend(s.id);
+                    return;
+                }
                 insert(s);
                 break;
             case "d":
@@ -407,7 +412,7 @@ final class Repo {
      * Сравнивает свой лист с описью друга: применяет его стирания и отмены, а штрихи, которых у него
      * нет, снова ставит на отправку.
      */
-    Comparison compareInventory(JSONObject o) throws JSONException {
+    Comparison compareInventory(JSONObject o, long resendDelayMs) throws JSONException {
         Comparison r = new Comparison();
         long c = o.optLong("c");
         if (c > clearT) applyPeerClear(c);
@@ -429,7 +434,7 @@ final class Repo {
             mine.add(prefix);
             // Совсем свежий штрих может быть ещё в пути.
             if (st.t >= windowT && !theirs.contains(prefix) && now - st.seenMs > 6000 && r.resent < 150) {
-                resend(st);
+                resend(st, now + resendDelayMs);
                 r.resent++;
             }
         }
@@ -442,11 +447,25 @@ final class Repo {
         return r;
     }
 
-    private void resend(Stroke st) {
+    /** Досылает штрих не сразу: у нескольких участников он есть, и первый избавит остальных от работы. */
+    private void resend(Stroke st, long notBefore) {
         for (Op op : outbox) {
             if (op.d.equals(st.id)) return;
         }
-        enqueue(new Op(st.id, st.payload(), nowSec()));
+        Op op = new Op(st.id, st.payload(), nowSec());
+        op.nextSend = notBefore;
+        enqueue(op);
+    }
+
+    private void cancelUnsentResend(String id) {
+        Iterator<Op> it = outbox.iterator();
+        while (it.hasNext()) {
+            Op op = it.next();
+            if (op.attempts == 0 && op.d.equals(id)) {
+                it.remove();
+                return;
+            }
+        }
     }
 
     // ---------- Диск ----------

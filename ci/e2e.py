@@ -18,6 +18,11 @@ import websocket
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from PIL import Image
 
+try:
+    from coincurve import PrivateKey
+except ImportError:
+    PrivateKey = None
+
 PKG = "app.holst"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 RELAYS = [
@@ -93,19 +98,36 @@ def schnorr_sign(msg, sk):
     return rx + ((k + e * d) % n).to_bytes(32, "big")
 
 
+def x_only(sk):
+    if PrivateKey is not None:
+        return PrivateKey(sk).public_key_xonly.format().hex()
+    return pmul(G, int.from_bytes(sk, "big"))[0].to_bytes(32, "big").hex()
+
+
+def sign_event(eid, sk):
+    if PrivateKey is not None:
+        return PrivateKey(sk).sign_schnorr(eid, secrets.token_bytes(32))
+    return schnorr_sign(eid, sk)
+
+
 class Friend:
-    def __init__(self, code):
+    """Участник листа: как настоящий телефон, со своим ключом подписи и общей меткой."""
+
+    def __init__(self, code, relays=None):
         master = hashlib.pbkdf2_hmac("sha256", code.encode(), b"holst-room-v1", 150000, 32)
-        self.sk = hashlib.sha256(b"holst-sign" + master).digest()
+        self.legacy_pub = x_only(hashlib.sha256(b"holst-sign" + master).digest())
+        self.tag = hashlib.sha256(b"holst-tag" + master).hexdigest()[:32]
+        self.sk = secrets.token_bytes(32)
+        self.pub = x_only(self.sk)
         self.aes = AESGCM(hashlib.sha256(b"holst-aes" + master).digest())
-        self.pub = pmul(G, int.from_bytes(self.sk, "big"))[0].to_bytes(32, "big").hex()
+        self.relays = relays or RELAYS
         self.got = []
         self.seen = set()
         self.acks = {}
         self.conns = {}
         self.lock = threading.Lock()
         self.stop = False
-        for url in RELAYS:
+        for url in self.relays:
             threading.Thread(target=self._run, args=(url,), daemon=True).start()
 
     def _run(self, url):
@@ -113,8 +135,9 @@ class Friend:
             try:
                 ws = websocket.create_connection(url, timeout=15, header=["User-Agent: Holst-e2e"])
                 ws.settimeout(60)
-                ws.send(json.dumps(["REQ", "s", {"authors": [self.pub], "kinds": [KIND_STORED], "since": 0, "limit": 1000}]))
-                ws.send(json.dumps(["REQ", "l", {"authors": [self.pub], "kinds": [KIND_LIVE], "since": int(time.time()) - 600}]))
+                ws.send(json.dumps(["REQ", "s", {"#t": [self.tag], "kinds": [KIND_STORED], "since": 0, "limit": 1000}]))
+                ws.send(json.dumps(["REQ", "l", {"#t": [self.tag], "kinds": [KIND_LIVE], "since": int(time.time()) - 600}]))
+                ws.send(json.dumps(["REQ", "o", {"authors": [self.legacy_pub], "kinds": [KIND_STORED], "since": 0, "limit": 1000}]))
                 self.conns[url] = ws
                 print(f"  friend connected {url}", flush=True)
                 while not self.stop:
@@ -150,12 +173,12 @@ class Friend:
     def publish(self, kind, d, plain, created_at=None):
         nonce = secrets.token_bytes(12)
         content = base64.b64encode(nonce + self.aes.encrypt(nonce, json.dumps(plain, separators=(",", ":")).encode(), None)).decode()
-        tags = [["d", d]] if d else []
+        tags = ([["d", d]] if d else []) + [["t", self.tag]]
         created = created_at if created_at is not None else int(time.time())
         ser = json.dumps([0, self.pub, created, kind, tags, content], separators=(",", ":"), ensure_ascii=False)
         eid = hashlib.sha256(ser.encode()).digest()
         ev = {"id": eid.hex(), "pubkey": self.pub, "created_at": created, "kind": kind, "tags": tags,
-              "content": content, "sig": schnorr_sign(eid, self.sk).hex()}
+              "content": content, "sig": sign_event(eid, self.sk).hex()}
         with self.lock:
             self.seen.add(ev["id"])
         for url, ws in list(self.conns.items()):
@@ -456,7 +479,7 @@ def main():
     path = shot("07_friend_live")
     live_px = count_color(path, colour)
     check("живой штрих друга виден сразу", live_px > 1000, f"{live_px} точек", hard=False)
-    check("подпись «Друг рисует»", find_text("Друг рисует…") is not None, hard=False)
+    check("подпись «Рисуют…»", find_text("Рисуют…") is not None, hard=False)
     friend.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": int(time.time() * 1000), "c": magenta, "w": 300, "e": 0,
                                       "p": [800, -2000, 2200, 0, 2000, 0, 2000, 0, 2200, 0]})
     time.sleep(3)

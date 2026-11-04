@@ -29,6 +29,16 @@ final class Prefs {
         return id;
     }
 
+    /** Ключ подписи этого телефона. */
+    byte[] deviceSecret() {
+        String hex = sp.getString("device_secret", null);
+        if (hex == null) {
+            hex = Crypto.hex(Room.newDeviceSecret());
+            sp.edit().putString("device_secret", hex).apply();
+        }
+        return Crypto.unhex(hex);
+    }
+
     void setCode(String code) {
         sp.edit().putString("code", code).apply();
     }

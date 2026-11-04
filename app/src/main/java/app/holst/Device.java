@@ -31,9 +31,9 @@ final class Device {
             ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
             am.getMemoryInfo(info);
             double gb = info.totalMem / (1024.0 * 1024 * 1024);
-            if (am.isLowRamDevice() || gb < 3.2) instance = new Device(720, 2, false);
-            else if (gb < 6.2) instance = new Device(1080, 3, true);
-            else instance = new Device(1440, 4, true);
+            if (am.isLowRamDevice() || gb < 3.2) instance = new Device(720, 5, false);
+            else if (gb < 6.2) instance = new Device(1080, 9, true);
+            else instance = new Device(1440, 9, true);
         }
         return instance;
     }

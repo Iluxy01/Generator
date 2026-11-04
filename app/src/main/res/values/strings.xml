@@ -25,7 +25,7 @@
     <string name="menu_settings">Разрешения</string>
     <string name="menu_off">Выключить холст</string>
     <string name="menu_on">Включить холст</string>
-    <string name="onboarding_tagline">Твой экран блокировки — общий лист с другом. Настрой один раз, дальше всё работает само.</string>
+    <string name="onboarding_tagline">Твой экран блокировки — общий лист с друзьями, до 10 человек. Настрой один раз, дальше всё работает само.</string>
     <string name="onboarding_bg_title">1. Что положить под рисунки</string>
     <string name="onboarding_bg_hint">Эта картинка станет обоями экрана блокировки</string>
     <string name="onboarding_bg_picture">Выбрана картинка. Можно поменять</string>
@@ -50,7 +50,7 @@
 
     <string name="permissions_card">Чтобы холст открывался сам</string>
     <string name="perm_overlay">Показывать холст на экране блокировки</string>
-    <string name="perm_notifications">Сообщать, когда друг нарисовал</string>
+    <string name="perm_notifications">Сообщать, когда кто-то нарисовал</string>
     <string name="perm_battery">Оставаться на связи в фоне</string>
     <string name="perm_allow">Разрешить</string>
     <string name="perm_ready">Разрешено</string>
@@ -68,19 +68,19 @@
     <string name="canvas_off">Холст выключен. На экране блокировки теперь обои рабочего стола.</string>
 
     <string name="unlock_hint">Потяни вверх</string>
-    <string name="friend_drawing">Друг рисует…</string>
+    <string name="friend_drawing">Рисуют…</string>
     <string name="clear_all">Стереть всё</string>
-    <string name="clear_confirm">Точно стереть у обоих?</string>
+    <string name="clear_confirm">Точно стереть у всех?</string>
     <string name="undo">Отменить</string>
     <string name="eraser">Ластик</string>
     <string name="brush">Кисть</string>
 
     <string name="channel_service">Холст включён</string>
-    <string name="channel_friend">Друг нарисовал</string>
+    <string name="channel_friend">Кто-то нарисовал</string>
     <string name="channel_layer">Показ холста</string>
     <string name="service_title">Холст включён</string>
-    <string name="service_text">Друг может рисовать на твоих обоях</string>
-    <string name="friend_title">Друг рисует на твоих обоях</string>
+    <string name="service_text">Друзья могут рисовать на твоих обоях</string>
+    <string name="friend_title">На твоих обоях рисуют</string>
     <string name="friend_text">Загляни на экран блокировки</string>
     <string name="layer_notification">Открываю холст</string>
 </resources>

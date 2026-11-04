@@ -3,9 +3,11 @@ package app.holst;
 import android.os.PowerManager;
 import android.util.Log;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -18,9 +20,18 @@ import org.json.JSONObject;
 final class Sync implements RelayPool.Listener, Repo.Listener {
     private static final String TAG = "Holst";
     private static final long PUMP_MS = 400;
-    private static final int PUMP_BUDGET = 5;
+    private static final int PUMP_BUDGET = 4;
     private static final long INVENTORY_EVERY_MS = 10_000;
     private static final long PEER_ONLINE_MS = 200_000;
+    private static final long PEER_RECENT_MS = 240_000;
+
+    /** Что последний раз сообщил другой телефон. */
+    private static final class Peer {
+        String hash;
+        int count;
+        long clear;
+        long seenAt;
+    }
 
     private final App app;
     private final String deviceId;
@@ -42,11 +53,11 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
 
     private long lastDigestSent;
     private long nextDigestAt;
-    private long lastInventorySent;
+    private long lastInventoryAt;
     private boolean inventoryScheduled;
-    private String peerHash;
-    private int peerCount = -1;
-    private long peerClear;
+    private boolean forceInventory;
+    private final Map<String, Peer> peers = new HashMap<>();
+    private final Random random = new Random();
     private volatile long peerSeenAt;
 
     private final Runnable pump = this::pumpTick;
@@ -92,11 +103,11 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
         final int gen = ++generation;
         final String code = app.prefs.code();
         app.net.execute(() -> {
-            final Room r = Room.derive(code);
+            final Room r = Room.derive(code, app.prefs.deviceSecret());
             app.main.post(() -> {
                 if (gen != generation || !started) return;
                 room = r;
-                RelayPool p = new RelayPool(this, r.pubHex);
+                RelayPool p = new RelayPool(this, r);
                 pool = p;
                 updatePace();
                 p.start(app.repo.sinceSec());
@@ -115,8 +126,8 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
         room = null;
         sent.clear();
         open = 0;
-        peerHash = null;
-        peerCount = -1;
+        peers.clear();
+        forceInventory = false;
         peerSeenAt = 0;
         app.main.removeCallbacks(pump);
         app.main.removeCallbacks(digestTick);
@@ -143,6 +154,11 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
 
     private boolean screenOn() {
         return app.getSystemService(PowerManager.class).isInteractive();
+    }
+
+    /** Как часто отправлять куски живого штриха: при большой компании реже, чтобы не упереться в лимиты. */
+    long liveIntervalMs() {
+        return peerCount() > 3 ? 450 : 300;
     }
 
     void onNetworkChanged() {
@@ -180,7 +196,7 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
         app.live.execute(() -> {
             Room.Event e = r.event(RelayPool.KIND_LIVE, null, r.encrypt(payload), System.currentTimeMillis() / 1000);
             p.markSeen(e.id);
-            p.publish(e.json);
+            p.publishLive(e.json);
         });
     }
 
@@ -250,7 +266,9 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
         if (pool == null) return;
         if (open > 0) sendDigest();
         long interval = LockActivity.isVisible() ? 10_000 : screenOn() ? 60_000 : 180_000;
-        scheduleDigest(interval);
+        // Чем больше участников, тем реже говорит каждый: общий поток сообщений остаётся небольшим.
+        double scaled = interval * (1 + peerCount() / 4.0) * (0.8 + random.nextDouble() * 0.4);
+        scheduleDigest((long) scaled);
     }
 
     private void sendDigest() {
@@ -259,27 +277,62 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
                 + "\",\"n\":" + app.repo.count() + ",\"c\":" + app.repo.clearT() + "}");
     }
 
-    private boolean inSyncWithPeer() {
-        return peerHash != null && peerHash.equals(app.repo.fingerprint())
-                && peerCount == app.repo.count() && peerClear == app.repo.clearT();
+    private int peerCount() {
+        long now = System.currentTimeMillis();
+        int n = 0;
+        for (Peer p : peers.values()) {
+            if (now - p.seenAt < PEER_RECENT_MS) n++;
+        }
+        return n;
+    }
+
+    /** Случайная задержка: при десяти участниках телефоны не должны отвечать хором. */
+    private long jitter(long maxPerPeer) {
+        return (long) (random.nextDouble() * maxPerPeer * Math.max(1, peerCount()));
+    }
+
+    private boolean matches(Peer p) {
+        return p.hash.equals(app.repo.fingerprint()) && p.count == app.repo.count() && p.clear == app.repo.clearT();
+    }
+
+    /** Совпал ли лист со всеми, кого недавно было слышно. */
+    private boolean inSyncWithAll() {
+        long now = System.currentTimeMillis();
+        boolean any = false;
+        for (Peer p : peers.values()) {
+            if (now - p.seenAt >= PEER_RECENT_MS) continue;
+            any = true;
+            if (!matches(p)) return false;
+        }
+        return any;
     }
 
     private void onPeerDigest(JSONObject o) throws JSONException {
-        if (deviceId.equals(o.optString("f"))) return;
+        String from = o.optString("f");
+        if (deviceId.equals(from)) return;
         peerSeen();
-        peerHash = o.getString("h");
-        peerCount = o.getInt("n");
-        peerClear = o.optLong("c");
-        if (peerClear > app.repo.clearT()) app.repo.applyPeerClear(peerClear);
-        long now = System.currentTimeMillis();
-        if (inSyncWithPeer()) {
+        Peer p = peers.get(from);
+        if (p == null) {
+            p = new Peer();
+            peers.put(from, p);
+        }
+        p.hash = o.getString("h");
+        p.count = o.getInt("n");
+        p.clear = o.optLong("c");
+        p.seenAt = System.currentTimeMillis();
+        if (p.clear > app.repo.clearT()) app.repo.applyPeerClear(p.clear);
+        long now = p.seenAt;
+        if (inSyncWithAll()) {
             app.repo.dropOutbox();
+            forceInventory = false;
+        }
+        if (matches(p)) {
             // Отвечаем нечасто: другой телефон только что проснулся и хочет знать, что мы здесь.
-            if (now - lastDigestSent > 15_000) sendDigest();
+            if (now - lastDigestSent > 15_000) digestSoon(jitter(600));
             return;
         }
-        if (now - lastDigestSent > 3000) sendDigest();
-        scheduleInventory(3000);
+        if (now - lastDigestSent > 3000) digestSoon(jitter(600));
+        scheduleInventory(3000 + jitter(1000));
     }
 
     private void scheduleInventory(long delay) {
@@ -288,30 +341,37 @@ final class Sync implements RelayPool.Listener, Repo.Listener {
         app.main.postDelayed(inventoryCheck, delay);
     }
 
+    /**
+     * Описи листов тяжелее всего остального, а одной на всех обычно достаточно: все видят её и
+     * досылают недостающее. Поэтому после чужой описи своя откладывается.
+     */
     private void inventoryCheck() {
         inventoryScheduled = false;
-        if (pool == null || peerHash == null || inSyncWithPeer()) return;
+        if (pool == null || peers.isEmpty() || (inSyncWithAll() && !forceInventory)) return;
         long now = System.currentTimeMillis();
+        long gap = INVENTORY_EVERY_MS + peerCount() * 3000L;
         // Пока кто-то рисует, расхождение нормально: штрихи ещё в пути.
-        long wait = Math.max(4000 - (now - app.repo.lastChangeMs()), INVENTORY_EVERY_MS - (now - lastInventorySent));
+        long wait = Math.max(4000 - (now - app.repo.lastChangeMs()), gap - (now - lastInventoryAt));
         if (wait > 0) {
-            scheduleInventory(wait);
+            scheduleInventory(wait + jitter(300));
             return;
         }
-        lastInventorySent = now;
-        Log.d(TAG, "sheets differ: mine " + app.repo.count() + ", peer " + peerCount);
+        lastInventoryAt = now;
+        forceInventory = false;
+        Log.d(TAG, "sheets differ: mine " + app.repo.count());
         sendControl(app.repo.inventoryPayload(deviceId));
     }
 
     private void onPeerInventory(JSONObject o) throws JSONException {
         if (deviceId.equals(o.optString("f"))) return;
         peerSeen();
-        Repo.Comparison r = app.repo.compareInventory(o);
+        lastInventoryAt = System.currentTimeMillis();
+        Repo.Comparison r = app.repo.compareInventory(o, jitter(1200));
         Log.d(TAG, "inventory: resend " + r.resent + ", missing here " + r.iAmMissing);
         if (r.iAmMissing) {
-            // Друг увидит мою опись и пришлёт то, чего нет здесь.
-            peerHash = o.optString("f") + "?";
-            scheduleInventory(500);
+            // Увидят мою опись и пришлют то, чего нет здесь.
+            forceInventory = true;
+            scheduleInventory(500 + jitter(800));
         }
     }
 

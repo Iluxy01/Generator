@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Стресс-тест: воспроизводит то, на что жалуются люди.
 С --strict падает, если исправленные сбои вернулись. Без него только печатает цифры."""
-import json, os, re, secrets, sys, time, traceback
+import json, os, re, secrets, sys, threading, time, traceback
 import e2e
 from e2e import Friend, KIND_LIVE, KIND_STORED, OUT, PKG, center, count_color, draw_curve, find_text, on_layer, sh, shot, sleep_phone, tap_text, tap_xy, ui_nodes, wake_phone, top_activity
 from PIL import Image
@@ -24,6 +24,11 @@ STRICT = {
     "friend_drawing_anr": lambda v: v == 0,
     "wallpaper_writes_on_home_screen": lambda v: v == 0,
     "wallpaper_write_during_unlock": lambda v: v == 0,
+    "ten_app_missing_strokes": lambda v: v == 0,
+    "ten_fingerprint_match": lambda v: v is True,
+    "ten_participants_missing_app_strokes": lambda v: v == 0,
+    "ten_worst_hang_ms": lambda v: v < 400,
+    "ten_anr": lambda v: v == 0,
 }
 
 
@@ -323,6 +328,133 @@ def friend_drawing(c):
     shot("s6_friend_drawing")
 
 
+def ten_people(c):
+    """Телефон и ещё 9 участников рисуют одновременно. Настоящая проверка: лист должен совпасть."""
+    W, H, friend = c.W, c.H, c.friend
+    # Начинаем с чистого листа, чтобы точно знать, что на нём должно быть.
+    base = int((time.time() + 700) * 1000)
+    friend.publish(KIND_STORED, f"c{base}", {"k": "c", "t": base - 1000})
+    time.sleep(6)
+    relays = e2e.RELAYS
+    bots = [Friend(c.code, relays=[relays[(i + j) % len(relays)] for j in range(3)]) for i in range(9)]
+    time.sleep(8)
+    print("  connected:", [len(b.conns) for b in bots], flush=True)
+    sh("logcat", "-c")
+    sh("shell", "dumpsys", "gfxinfo", PKG, "reset")
+    mark = len(friend.got)
+    sent, lock, seconds = {}, threading.Lock(), 60
+    end = time.time() + seconds
+
+    def draw(n, bot):
+        seq_t = 0
+        while time.time() < end:
+            sid = secrets.token_hex(8)
+            all_pts = []
+            row = -7000 + n * 1500 + (seq_t % 4) * 300
+            for j in range(24):
+                all_pts.append((800 + j * 360, row + (j % 6) * 60))
+            for s in range(3):
+                part = all_pts[s * 8:(s + 1) * 8 + 1]
+                px = py = 0
+                delta = []
+                for x, y in part:
+                    delta += [x - px, y - py]
+                    px, py = x, y
+                bot.publish(KIND_LIVE, None, {"k": "l", "i": sid, "c": 0xFF000000 | (0x1F << 16) | (n * 28 << 8) | 0xE0, "w": 90, "e": 0,
+                                              "n": s, "a": s * 400, "b": (s + 1) * 400, "p": delta})
+                time.sleep(.42)
+            px = py = 0
+            delta = []
+            for x, y in all_pts:
+                delta += [x - px, y - py]
+                px, py = x, y
+            bot.publish(KIND_STORED, sid, {"k": "s", "i": sid, "t": base + int((time.time() % 100000) * 1000) + n, "c": 0xFF000000 | (0x1F << 16) | (n * 28 << 8) | 0xE0,
+                                           "w": 90, "e": 0, "u": 1200, "p": delta})
+            with lock:
+                sent[sid] = n
+            seq_t += 1
+            time.sleep(.3)
+
+    threads = [threading.Thread(target=draw, args=(i, b), daemon=True) for i, b in enumerate(bots)]
+    for t in threads:
+        t.start()
+    time.sleep(1)
+    shot("s6a_ten_midway_0")
+    drawn_by_app = 0
+    while time.time() < end - 2:
+        y = int(H * (0.25 + (drawn_by_app % 10) * .05))
+        swipe(int(W * .15), y, int(W * .85), y + 40, 700)
+        drawn_by_app += 1
+        time.sleep(.6)
+    for t in threads:
+        t.join(20)
+    shot("s6a_ten_right_after")
+    # Ни один из 9 участников не отвечает на сверку, поэтому лист сходится только за счёт самих ретрансляторов.
+    time.sleep(35)
+    shot("s6a_ten_after_wait")
+    log = full_log()
+    hang, n = worst_hang_ms(log)
+    metric("ten_worst_hang_ms", int(hang))
+    metric("ten_hang_events", n)
+    metric("ten_anr", anr_count(log))
+    metric("ten_frames", gfx())
+    rej = re.findall(r"rejected by (wss://[^:]+): ([^\n]{0,40})", log)
+    per = {}
+    for u, m in rej:
+        per.setdefault(u, {}).setdefault(m.strip(), 0)
+        per[u][m.strip()] += 1
+    print("  app rejections:", json.dumps(per, ensure_ascii=False), flush=True)
+    print("  app cooling:", sorted(set(re.findall(r"cooling (wss://\S+)", log))), flush=True)
+    bot_rej = {}
+    for b in bots:
+        for eid, m in b.acks.items():
+            for url, (ok, msg) in m.items():
+                if not ok:
+                    bot_rej[(url, msg[:40])] = bot_rej.get((url, msg[:40]), 0) + 1
+    print("  participants rejections:", bot_rej, flush=True)
+
+    app_ids = {g["i"] for g in friend.got[mark:] if g.get("k") == "s" and g["i"] not in sent}
+    metric("ten_strokes_by_participants", len(sent))
+    metric("ten_strokes_by_app", drawn_by_app)
+    metric("ten_app_strokes_seen", len(app_ids))
+    missing = sum(len(app_ids - {g.get("i") for g in b.got if g.get("k") == "s"}) for b in bots)
+    metric("ten_participants_missing_app_strokes", missing)
+    cross = 0
+    for i, b in enumerate(bots):
+        have = {g.get("i") for g in b.got if g.get("k") == "s"}
+        cross += sum(1 for sid, n in sent.items() if n != i and sid not in have)
+    metric("ten_missing_between_participants", cross)
+
+    # Приложение само сообщает отпечаток листа в сверке: сравниваем его с тем, что должно быть.
+    want_ids = set(sent) | app_ids
+    want = 0
+    for sid in want_ids:
+        want ^= int(sid, 16)
+    digests = []
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        digests = [g for g in friend.got if g.get("k") == "h"]
+        if digests and digests[-1]["_at"] > time.time() - 12:
+            break
+        time.sleep(1)
+    last = digests[-1] if digests else {}
+    metric("ten_app_sheet_size", last.get("n", -1))
+    metric("ten_expected_sheet_size", len(want_ids))
+    metric("ten_app_missing_strokes", len(want_ids) - last.get("n", 0))
+    metric("ten_fingerprint_match", last.get("h") == format(want, "x"))
+    since = [g for g in friend.got[mark:]]
+    span = max(1, (since[-1]["_at"] - since[0]["_at"]) / 60) if since else 1
+    metric("ten_app_digests_per_min", round(len([g for g in since if g.get("k") == "h"]) / span, 1))
+    metric("ten_app_inventories_per_min", round(len([g for g in since if g.get("k") == "v"]) / span, 1))
+    for b in bots:
+        b.stop = True
+        for ws in list(b.conns.values()):
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+
 def home_screen(c):
     """Телефон разблокирован, человек листает рабочий стол, а друг в это время рисует."""
     W, H, friend, bar_y = c.W, c.H, c.friend, c.bar_y
@@ -343,7 +475,7 @@ def home_screen(c):
     shot("s7_home")
     sh("logcat", "-c")
     sh("shell", "dumpsys", "gfxinfo", launcher, "reset")
-    base = int((time.time() + 600) * 1000)
+    base = int((time.time() + 2000) * 1000)
     stop_at = time.time() + 60
     i = 0
     next_stroke = 0
@@ -393,6 +525,7 @@ def main():
     code = "".join(str(secrets.randbelow(10)) for _ in range(12))
     c = Ctx()
     c.friend = Friend(code)
+    c.code = code
     sh("shell", "settings", "put", "system", "screen_off_timeout", "1800000")
     sh("install", "-r", "-g", apk, timeout=180)
     sh("shell", "appops", "set", PKG, "SYSTEM_ALERT_WINDOW", "allow")
@@ -422,7 +555,7 @@ def main():
     shot("s0_layer")
 
     for fn in (steady_drawing, long_stroke, clear_with_clock_skew, undo_with_clock_skew, friend_clear_old_clock,
-               silent_disconnect, anti_entropy, flood, friend_drawing, home_screen):
+               silent_disconnect, anti_entropy, flood, friend_drawing, ten_people, home_screen):
         print(f"--- {fn.__name__}", flush=True)
         section(fn, c)
 

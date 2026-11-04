@@ -55,6 +55,8 @@ final class RelayPool {
     }
 
     private final Listener listener;
+    private final String tag;
+    private final String legacyPubHex;
     private final String pubHex;
     private final OkHttpClient http;
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
@@ -70,9 +72,11 @@ final class RelayPool {
     private volatile boolean stopped;
     private volatile boolean fast;
 
-    RelayPool(Listener listener, String pubHex) {
+    RelayPool(Listener listener, Room room) {
         this.listener = listener;
-        this.pubHex = pubHex;
+        this.tag = room.tag;
+        this.legacyPubHex = room.legacyPubHex;
+        this.pubHex = room.pubHex;
         this.http = new OkHttpClient.Builder()
                 .pingInterval(25, TimeUnit.SECONDS)
                 .connectTimeout(10, TimeUnit.SECONDS)
@@ -243,10 +247,14 @@ final class RelayPool {
         }
 
         void subscribe() {
-            String stored = "[\"REQ\",\"s\",{\"authors\":[\"" + pubHex + "\"],\"kinds\":[" + KIND_STORED
+            String stored = "[\"REQ\",\"s\",{\"#t\":[\"" + tag + "\"],\"kinds\":[" + KIND_STORED
                     + "],\"since\":" + since + ",\"limit\":1000}]";
-            String live = "[\"REQ\",\"l\",{\"authors\":[\"" + pubHex + "\"],\"kinds\":[" + KIND_LIVE
+            String live = "[\"REQ\",\"l\",{\"#t\":[\"" + tag + "\"],\"kinds\":[" + KIND_LIVE
                     + "],\"since\":" + (System.currentTimeMillis() / 1000 - 600) + "}]";
+            // Рисунки, сделанные в прежней версии, лежат под общим ключом.
+            String legacy = "[\"REQ\",\"o\",{\"authors\":[\"" + legacyPubHex + "\"],\"kinds\":[" + KIND_STORED
+                    + "],\"since\":" + since + ",\"limit\":1000}]";
+            send(legacy);
             send(stored);
             send(live);
         }
@@ -309,7 +317,7 @@ final class RelayPool {
                 String type = a.getString(0);
                 if ("EVENT".equals(type)) {
                     JSONObject e = a.getJSONObject(2);
-                    if (!pubHex.equals(e.optString("pubkey"))) return;
+                    // Чужие события с той же меткой не расшифруются и будут отброшены выше.
                     if (seen.put(e.getString("id"), Boolean.TRUE) != null) return;
                     listener.onEvent(e.getInt("kind"), e.getLong("created_at"), e.getString("content"));
                 } else if ("OK".equals(type)) {

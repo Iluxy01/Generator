@@ -27,7 +27,7 @@ public final class CanvasView extends View implements Repo.Listener {
         void onDrawing(boolean drawing);
     }
 
-    private static final long LIVE_SEND_MS = 300;
+    private static final long EXACT_ORDER_DELAY_MS = 2500;
     private static final int MIN_STEP = 10;
     private static final int MAX_PAIRS = 1200;
     private static final long BAKE_DELAY_MS = 150;
@@ -105,11 +105,12 @@ public final class CanvasView extends View implements Repo.Listener {
         public void run() {
             if (!drawing) return;
             flushLive();
-            postDelayed(this, LIVE_SEND_MS);
+            postDelayed(this, app.sync.liveIntervalMs());
         }
     };
     private final Runnable renderLater = this::renderIfNeeded;
     private final Runnable bakeLater = this::bakeNow;
+    private final Runnable exactOrder = this::requestRender;
 
     public CanvasView(Context c, AttributeSet a) {
         super(c, a);
@@ -319,14 +320,25 @@ public final class CanvasView extends View implements Repo.Listener {
 
     private void commitPlayback(Playback p) {
         Stroke s = playingStrokes.get(p.id);
-        if (s != null && !rendering && !renderDirty && app.repo.isLast(s)) {
+        if (s != null && !s.erase) {
             addPending(s);
             playing.remove(p.id);
             playingStrokes.remove(p.id);
+            if (!app.repo.isLast(s)) scheduleExactOrder();
         } else {
             // Штрих уже виден целиком; лист перестроится с ним в нужном порядке.
             requestRender();
         }
+    }
+
+    /**
+     * Когда рисует много людей, штрихи почти всегда приходят не по порядку. Перестраивать из-за
+     * этого всю картинку незачем: штрих сразу кладётся сверху, а точный порядок восстанавливается,
+     * когда все на пару секунд остановятся.
+     */
+    private void scheduleExactOrder() {
+        removeCallbacks(exactOrder);
+        postDelayed(exactOrder, EXACT_ORDER_DELAY_MS);
     }
 
     private void addPending(Stroke s) {
@@ -368,7 +380,7 @@ public final class CanvasView extends View implements Repo.Listener {
                 if (device.unbufferedTouch) requestUnbufferedDispatch(e);
                 startStroke(e.getEventTime());
                 addPoint(e.getX(), e.getY(), e.getEventTime());
-                postDelayed(liveSender, LIVE_SEND_MS);
+                postDelayed(liveSender, app.sync.liveIntervalMs());
                 invalidate();
                 return true;
             case MotionEvent.ACTION_MOVE:
@@ -508,7 +520,13 @@ public final class CanvasView extends View implements Repo.Listener {
             return;
         }
         if (!atEnd) {
-            requestRender();
+            boolean recent = Math.abs(System.currentTimeMillis() / 1000 - s.sec) <= FRESH_SEC;
+            if (recent && !s.erase) {
+                addPending(s);
+                scheduleExactOrder();
+            } else {
+                requestRender();
+            }
             return;
         }
         addPending(s);

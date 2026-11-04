@@ -23,29 +23,46 @@ final class Room {
     final String code;
     final byte[] secret;
     final byte[] aesKey;
+    /** Открытый ключ этого телефона. У каждого свой: ретрансляторы считают частоту по ключу. */
     final String pubHex;
+    /** Метка листа: по ней телефоны находят события друг друга. */
+    final String tag;
+    /** Общий ключ прежних версий: по нему читаются рисунки, сделанные до обновления. */
+    final String legacyPubHex;
     private final Crypto.Signer signer;
 
-    private Room(String code, byte[] secret, byte[] aesKey, String pubHex) {
+    private Room(String code, byte[] secret, byte[] aesKey, String tag, String legacyPubHex) {
         this.code = code;
         this.secret = secret;
         this.aesKey = aesKey;
-        this.pubHex = pubHex;
+        this.tag = tag;
+        this.legacyPubHex = legacyPubHex;
+        this.pubHex = Crypto.hex(Crypto.publicKey(secret));
         this.signer = new Crypto.Signer(secret);
     }
 
-    static Room derive(String code) {
+    /** Ключ подписи для этого телефона; хранится на нём и никуда не уходит. */
+    static byte[] newDeviceSecret() {
+        byte[] s = new byte[32];
+        do {
+            RANDOM.nextBytes(s);
+        } while (new BigInteger(1, s).signum() == 0 || new BigInteger(1, s).compareTo(Crypto.N) >= 0);
+        return s;
+    }
+
+    static Room derive(String code, byte[] deviceSecret) {
         try {
             SecretKeyFactory f = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             byte[] master = f.generateSecret(
                     new PBEKeySpec(code.toCharArray(), SALT, ITERATIONS, 256)).getEncoded();
-            byte[] secret = Crypto.sha256("holst-sign".getBytes(StandardCharsets.UTF_8), master);
-            while (new BigInteger(1, secret).signum() == 0
-                    || new BigInteger(1, secret).compareTo(Crypto.N) >= 0) {
-                secret = Crypto.sha256(secret);
+            byte[] legacy = Crypto.sha256("holst-sign".getBytes(StandardCharsets.UTF_8), master);
+            while (new BigInteger(1, legacy).signum() == 0
+                    || new BigInteger(1, legacy).compareTo(Crypto.N) >= 0) {
+                legacy = Crypto.sha256(legacy);
             }
+            String tag = Crypto.hex(Crypto.sha256("holst-tag".getBytes(StandardCharsets.UTF_8), master)).substring(0, 32);
             byte[] aes = Crypto.sha256("holst-aes".getBytes(StandardCharsets.UTF_8), master);
-            return new Room(code, secret, aes, Crypto.hex(Crypto.publicKey(secret)));
+            return new Room(code, deviceSecret, aes, tag, Crypto.hex(Crypto.publicKey(legacy)));
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException(e);
         }
@@ -109,7 +126,8 @@ final class Room {
 
     /** content — Base64, поэтому экранирование JSON здесь не требуется. */
     Event event(int kind, String dTag, String content, long createdAt) {
-        String tags = dTag == null ? "[]" : "[[\"d\",\"" + dTag + "\"]]";
+        String tTag = "[\"t\",\"" + tag + "\"]";
+        String tags = dTag == null ? "[" + tTag + "]" : "[[\"d\",\"" + dTag + "\"]," + tTag + "]";
         String serial = "[0,\"" + pubHex + "\"," + createdAt + "," + kind + "," + tags + ",\"" + content + "\"]";
         byte[] idBytes = Crypto.sha256(serial.getBytes(StandardCharsets.UTF_8));
         byte[] aux = new byte[32];
