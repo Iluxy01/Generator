@@ -30,9 +30,9 @@ public final class CanvasView extends View implements Repo.Listener {
     private static final long LIVE_SEND_MS = 300;
     private static final int MIN_STEP = 10;
     private static final int MAX_PAIRS = 1200;
-    private static final long BAKE_IDLE_MS = 700;
-    private static final int BAKE_AT_ONCE = 12;
-    private static final int BAKE_MAX = 40;
+    private static final long BAKE_DELAY_MS = 150;
+    /** Контуры в каждом кадре тоже не бесплатны: больше стольких держать невыгодно. */
+    private static final int BAKE_MAX = 6;
     private static final long PLAYBACK_STALE_MS = 12_000;
     private static final long RENDER_GAP_MS = 100;
     private static final long FRESH_SEC = 20;
@@ -61,7 +61,7 @@ public final class CanvasView extends View implements Repo.Listener {
     /**
      * Законченные штрихи, ещё не впечатанные в картинку. Каждая запись в большую картинку заново
      * отправляет её в видеокарту, и на слабых телефонах это заметный рывок. Поэтому штрихи
-     * копятся и рисуются как контуры, а в картинку ложатся разом, когда рука остановилась.
+     * пара штрихов рисуется как контуры, а в картинку ложится, когда палец поднят.
      */
     private static final class Baking {
         final Stroke stroke;
@@ -168,6 +168,8 @@ public final class CanvasView extends View implements Repo.Listener {
         float scale = Math.min(1f, (float) device.maxWidth / w);
         layerW = Math.round(w * scale);
         layerH = Math.round(h * scale);
+        // Растягивать со сглаживанием нужно, только если картинка меньше экрана.
+        bitmapPaint.setFilterBitmap(scale < 1f);
         spare = null;
         layer = Bitmap.createBitmap(layerW, layerH, Bitmap.Config.ARGB_8888);
         layerCanvas = new Canvas(layer);
@@ -331,14 +333,14 @@ public final class CanvasView extends View implements Repo.Listener {
         pending.add(new Baking(s, Renderer.buildPath(s.pts, width, height)));
         if (!rendering && !renderDirty) renderedRevision = app.repo.revision();
         removeCallbacks(bakeLater);
-        postDelayed(bakeLater, pending.size() >= BAKE_AT_ONCE && !drawing ? 0 : BAKE_IDLE_MS);
+        postDelayed(bakeLater, BAKE_DELAY_MS);
         invalidate();
     }
 
     private void bakeNow() {
         if (pending.isEmpty() || layerCanvas == null) return;
         if (rendering || (drawing && pending.size() < BAKE_MAX)) {
-            postDelayed(bakeLater, BAKE_IDLE_MS);
+            postDelayed(bakeLater, BAKE_DELAY_MS);
             return;
         }
         for (Baking b : pending) Renderer.draw(layerCanvas, b.stroke, layerW, layerH, paint);
